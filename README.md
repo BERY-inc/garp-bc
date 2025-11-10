@@ -116,3 +116,9 @@ make build
 ## License
 
 [License information would go here]
+## Build Status
+
+![Rust CI](https://github.com/BERY-inc/garp-bc/actions/workflows/ci-rust.yml/badge.svg)
+![Go CI](https://github.com/BERY-inc/garp-bc/actions/workflows/ci-go.yml/badge.svg)
+![CD](https://github.com/BERY-inc/garp-bc/actions/workflows/cd.yml/badge.svg)
+![Unified CI/CD](https://github.com/BERY-inc/garp-bc/actions/workflows/ci-cd.yml/badge.svg)

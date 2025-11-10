@@ -14,10 +14,10 @@ spec:
     spec:
       containers:
         - name: backend
-          image: garp-backend:latest
+          image: ghcr.io/BERY-inc/garp-backend:latest
           imagePullPolicy: IfNotPresent
-          ports:
-            - containerPort: 8081
+      ports:
+        - containerPort: 8081
           env:
             - name: PARTICIPANT_URL
               value: "http://garp-participant:8090"

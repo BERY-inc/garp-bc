@@ -1,0 +1,42 @@
+name: CI - Rust Workspace
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  rust-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Build (workspace)
+        run: cargo build --workspace --all-targets --verbose
+
+      - name: Test (workspace)
+        run: cargo test --workspace --all-targets --verbose
+
+      - name: Security audit
+        run: |
+          cargo install cargo-audit --locked || true
+          cargo audit || true
