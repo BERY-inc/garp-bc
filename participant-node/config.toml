@@ -1,0 +1,27 @@
+participant_config = { participant_id = "participant-1", database_url = "postgresql://db/garp", api_port = 8090 }
+
+[database]
+url = "postgresql://db/garp"
+max_connections = 10
+connection_timeout = 30
+redis_url = "redis://redis:6379"
+
+[api]
+host = "0.0.0.0"
+port = 8090
+cors_origins = ["*"]
+
+[api.rate_limit]
+requests_per_minute = 100
+burst_size = 10
+
+[[sync_domains]]
+domain_id = "domain-1"
+endpoint = "http://sync-domain:8082"
+public_key = ""
+
+[security]
+private_key_file = "participant.key"
+encryption_enabled = true
+signature_required = true
+trusted_peers = []

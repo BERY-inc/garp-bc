@@ -1,0 +1,14 @@
+# Rust build artifacts
+target/
+
+# Go build outputs
+*.exe
+backend-go/garp-backend.exe
+
+# IDE and editor folders (common)
+.vscode/
+.idea/
+
+# Misc
+*.log
+*.tmp
