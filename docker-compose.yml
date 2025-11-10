@@ -104,5 +104,21 @@ services:
       redis:
         condition: service_healthy
 
+  api-gateway-go:
+    build:
+      context: .
+      dockerfile: api-gateway-go/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      BACKEND_URL: http://backend-go:8081
+      PARTICIPANT_URL: http://participant-node:8090
+      JWT_SECRET: dev-secret
+    depends_on:
+      backend-go:
+        condition: service_started
+      participant-node:
+        condition: service_healthy
+
 volumes:
   postgres_data:

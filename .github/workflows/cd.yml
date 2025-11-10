@@ -1,0 +1,65 @@
+name: CD - Build and Push Images
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-push:
+    name: Build & Push Release Images
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - component: backend-go
+            image: ghcr.io/${{ github.repository_owner }}/garp-backend
+            context: ./backend-go
+            dockerfile: ./backend-go/Dockerfile
+          - component: api-gateway-go
+            image: ghcr.io/${{ github.repository_owner }}/garp-api
+            context: ./api-gateway-go
+            dockerfile: ./api-gateway-go/Dockerfile
+          - component: participant-node
+            image: ghcr.io/${{ github.repository_owner }}/garp-participant
+            context: ./participant-node
+            dockerfile: ./participant-node/Dockerfile
+          - component: sync-domain
+            image: ghcr.io/${{ github.repository_owner }}/garp-sync-domain
+            context: ./sync-domain
+            dockerfile: ./sync-domain/Dockerfile
+          - component: global-synchronizer
+            image: ghcr.io/${{ github.repository_owner }}/garp-global-synchronizer
+            context: ./global-synchronizer
+            dockerfile: ./global-synchronizer/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:${{ github.ref_name }}
+            ${{ matrix.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
