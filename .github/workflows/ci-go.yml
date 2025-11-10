@@ -38,6 +38,16 @@ jobs:
       - name: Download deps
         run: go mod download
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.58.2
+          working-directory: backend-go
+          args: --timeout=5m
+
+      - name: Vet
+        run: go vet ./...
+
       - name: Build
         run: go build ./...
 
@@ -71,6 +81,16 @@ jobs:
 
       - name: Download deps
         run: go mod download
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v4
+        with:
+          version: v1.58.2
+          working-directory: api-gateway-go
+          args: --timeout=5m
+
+      - name: Vet
+        run: go vet ./...
 
       - name: Build
         run: go build ./...

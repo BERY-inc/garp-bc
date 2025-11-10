@@ -155,14 +155,19 @@ jobs:
         include:
           - component: participant-node
             image: ghcr.io/${{ github.repository_owner }}/garp-participant
+            paths: 'participant-node/**'
           - component: sync-domain
             image: ghcr.io/${{ github.repository_owner }}/garp-sync-domain
+            paths: 'sync-domain/**'
           - component: global-synchronizer
             image: ghcr.io/${{ github.repository_owner }}/garp-global-synchronizer
+            paths: 'global-synchronizer/**'
           - component: backend-go
             image: ghcr.io/${{ github.repository_owner }}/garp-backend
+            paths: 'backend-go/**'
           - component: api-gateway-go
             image: ghcr.io/${{ github.repository_owner }}/garp-api
+            paths: 'api-gateway-go/**'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -177,15 +182,35 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Detect changes for this service
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            service:
+              - ${{ matrix.paths }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ matrix.image }}
+          flavor: latest=true
+          tags: |
+            type=ref,event=branch
+            type=sha
+            type=semver,pattern={{major}}
+            type=semver,pattern={{major}}.{{minor}}
+
       - name: Build and push Docker image
+        if: steps.changes.outputs.service == 'true' || github.event_name != 'pull_request'
         uses: docker/build-push-action@v5
         with:
           context: .
           file: ./${{ matrix.component }}/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ matrix.image }}:latest
-            ${{ matrix.image }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
