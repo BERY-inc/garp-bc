@@ -1,0 +1,108 @@
+version: "3.8"
+
+services:
+  # Databases
+  postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_DB: garp
+      POSTGRES_USER: garp
+      POSTGRES_PASSWORD: garp
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U garp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
+  # Blockchain services
+  participant-node:
+    build:
+      context: .
+      dockerfile: participant-node/Dockerfile
+    ports:
+      - "8090:8090"
+    environment:
+      DATABASE_URL: postgresql://garp:garp@postgres:5432/garp
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:8090/health",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  sync-domain:
+    build:
+      context: .
+      dockerfile: sync-domain/Dockerfile
+    ports:
+      - "8082:8082"
+    environment:
+      DATABASE_URL: postgresql://garp:garp@postgres:5432/garp
+      KAFKA_BROKERS: kafka:9092
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  global-synchronizer:
+    build:
+      context: .
+      dockerfile: global-synchronizer/Dockerfile
+    ports:
+      - "8000:8000"
+      - "7000:7000"
+    environment:
+      DATABASE_URL: postgresql://garp:garp@postgres:5432/garp
+      NODE_ID: sync-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # API services
+  backend-go:
+    build:
+      context: .
+      dockerfile: backend-go/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      PARTICIPANT_URL: http://participant-node:8090
+      SYNCHRONIZER_URL: http://global-synchronizer:8000
+      POSTGRES_URL: postgresql://garp:garp@postgres:5432/garp
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      participant-node:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

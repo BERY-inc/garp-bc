@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: garp-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: garp-api
+  template:
+    metadata:
+      labels:
+        app: garp-api
+    spec:
+      containers:
+        - name: api
+          image: garp-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: BACKEND_URL
+              value: "http://garp-backend:8081"
+            - name: PARTICIPANT_URL
+              value: "http://garp-participant:8090"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: garp-secrets
+                  key: jwt_secret
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: garp-api
+spec:
+  selector:
+    app: garp-api
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP

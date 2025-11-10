@@ -1,0 +1,5 @@
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\pin_project_lite-8bfa8faf0112b535.d: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pin-project-lite-0.2.16\src\lib.rs
+
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\libpin_project_lite-8bfa8faf0112b535.rmeta: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pin-project-lite-0.2.16\src\lib.rs
+
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\pin-project-lite-0.2.16\src\lib.rs:

@@ -1,0 +1,17 @@
+# Sync Domain Configuration
+
+domain_id = "domain-1"
+database_url = "postgresql://garp:garp@localhost:5432/garp"
+
+[api]
+host = "0.0.0.0"
+port = 8082
+
+[kafka]
+bootstrap_servers = "localhost:9092"
+
+[storage]
+redis_url = "redis://localhost:6379"
+
+[logging]
+level = "info"

@@ -1,0 +1,11 @@
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\ed25519_dalek-a5178ebb23c3ad20.d: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\lib.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\constants.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\errors.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\signature.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\signing.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\verifying.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\hazmat.rs
+
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\libed25519_dalek-a5178ebb23c3ad20.rmeta: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\lib.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\constants.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\errors.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\signature.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\signing.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\verifying.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\hazmat.rs
+
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\lib.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\constants.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\errors.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\signature.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\signing.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\verifying.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\ed25519-dalek-2.2.0\src\hazmat.rs:

@@ -1,0 +1,23 @@
+# Global Synchronizer Configuration
+
+[node]
+node_id = "sync-1"
+
+[database]
+url = "postgresql://garp:garp@localhost:5432/garp"
+
+[api]
+port = 8000
+
+[consensus]
+port = 7000
+cluster_peers = ["localhost:7000", "localhost:7001", "localhost:7002"]
+
+[kafka]
+bootstrap_servers = ["localhost:9092"]
+
+[monitoring]
+enable_metrics = true
+
+[logging]
+level = "info"

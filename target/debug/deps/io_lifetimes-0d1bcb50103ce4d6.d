@@ -1,0 +1,10 @@
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\io_lifetimes-0d1bcb50103ce4d6.d: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\lib.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\portability.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\traits.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\example_ffi.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\raw.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\views.rs
+
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\libio_lifetimes-0d1bcb50103ce4d6.rmeta: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\lib.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\portability.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\traits.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\example_ffi.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\raw.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\views.rs
+
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\lib.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\portability.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\traits.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\example_ffi.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\raw.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\io-lifetimes-1.0.11\src\views.rs:

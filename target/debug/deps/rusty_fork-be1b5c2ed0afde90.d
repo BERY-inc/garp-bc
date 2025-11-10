@@ -1,0 +1,11 @@
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\rusty_fork-be1b5c2ed0afde90.d: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\lib.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\sugar.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\fork_test.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\error.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\cmdline.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\fork.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\child_wrapper.rs
+
+C:\Users\rosha\OneDrive\Desktop\garp\target\debug\deps\librusty_fork-be1b5c2ed0afde90.rmeta: C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\lib.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\sugar.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\fork_test.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\error.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\cmdline.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\fork.rs C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\child_wrapper.rs
+
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\lib.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\sugar.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\fork_test.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\error.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\cmdline.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\fork.rs:
+C:\Users\rosha\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\rusty-fork-0.3.1\src\child_wrapper.rs:

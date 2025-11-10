@@ -1,0 +1,73 @@
+[package]
+name = "sync-domain"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Common utilities
+garp-common = { path = "../common" }
+
+# Async runtime
+tokio = { version = "1.0", features = ["full"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# Unique IDs and time
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Message Queue (Kafka)
+rdkafka = { version = "0.36", features = ["cmake-build", "ssl", "sasl"] }
+
+# Message Queue (RabbitMQ alternative)
+lapin = "2.3"
+
+# Networking
+axum = "0.7"
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
+hyper = "1.0"
+tonic = "0.11"
+prost = "0.12"
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"] }
+
+# Consensus and coordination
+raft = "0.7"
+etcd-rs = "1.0"
+
+# Concurrency
+parking_lot = "0.12"
+
+# Configuration
+config = "0.14"
+clap = { version = "4.0", features = ["derive"] }
+
+# Metrics and monitoring
+prometheus = "0.13"
+metrics = "0.22"
+
+# Cryptography
+ring = "0.17"
+ed25519-dalek = "2.0"
+
+# Vector clocks for ordering
+vector_clock = "0.0.0"
+
+[build-dependencies]
+tonic-build = "0.11"
