@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
+use std::fmt;
 
 /// Unique identifier for participants in the network
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -93,6 +94,47 @@ pub enum AssetType {
     Product { sku: String, name: String },
     LoyaltyPoints { program: String },
     NFT { collection: String, token_id: String },
+}
+
+/// Canonical block header structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockHeader {
+    pub parent_hash: Vec<u8>,
+    pub slot: u64,
+    pub epoch: u64,
+    pub proposer: ParticipantId,
+    pub state_root: Vec<u8>,
+    pub tx_root: Vec<u8>,
+    pub receipt_root: Vec<u8>,
+}
+
+/// Canonical block structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Block {
+    pub header: BlockHeader,
+    pub hash: Vec<u8>,
+    pub timestamp: DateTime<Utc>,
+    pub transactions: Vec<Transaction>,
+}
+
+impl fmt::Display for Block {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "Block(epoch={}, slot={}, txs={})",
+            self.header.epoch, self.header.slot, self.transactions.len()
+        )
+    }
+}
+
+/// Transaction execution receipt
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Receipt {
+    pub transaction_id: TransactionId,
+    pub status: bool,
+    pub gas_used: u64,
+    pub logs: Vec<String>,
+    pub bloom: Vec<u8>,
 }
 
 /// Wallet balance information
@@ -192,6 +234,24 @@ pub struct GlobalSyncConfig {
     pub api_port: u16,
 }
 
+/// Genesis configuration describing initial chain state
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenesisConfig {
+    pub chain_id: String,
+    pub genesis_time: DateTime<Utc>,
+    pub initial_validators: Vec<ParticipantId>,
+    pub initial_balances: HashMap<ParticipantId, u64>,
+}
+
+/// Chain parameters for timing and validator rotation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainParams {
+    pub slot_duration_ms: u64,
+    pub epoch_length: u64,
+    pub randomness_beacon: Option<String>,
+    pub rotation_interval_slots: u64,
+}
+
 impl ParticipantId {
     pub fn new(id: &str) -> Self {
         Self(id.to_string())
@@ -213,5 +273,18 @@ impl ContractId {
 impl TransactionId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+}
+
+// Display implementations for identifier types used in error messages
+impl fmt::Display for ContractId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl fmt::Display for TransactionId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

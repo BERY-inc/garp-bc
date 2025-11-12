@@ -86,6 +86,15 @@ pub enum NetworkError {
 
     #[error("Authentication failed for peer: {0}")]
     AuthenticationFailed(String),
+
+    #[error("Peer banned: {0}")]
+    PeerBanned(String),
+
+    #[error("Transport error: {0}")]
+    TransportError(String),
+
+    #[error("Internal error: {0}")]
+    Internal(String),
 }
 
 /// Consensus mechanism errors
@@ -162,7 +171,7 @@ pub enum ContractError {
     #[error("Contract execution failed: {0}")]
     ExecutionFailed(String),
 
-    #[error("Choice not available: {choice} for contract {contract_id}")]
+    #[error("Choice not available: {choice} for contract {contract_id:?}")]
     ChoiceNotAvailable { choice: String, contract_id: ContractId },
 
     #[error("Unauthorized access to contract: {0}")]

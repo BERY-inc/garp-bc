@@ -1,4 +1,5 @@
 use crate::types::{NetworkMessage, ParticipantId, EncryptedData};
+use crate::types::{Transaction, Block};
 use crate::error::{NetworkError, GarpResult};
 use crate::crypto::CryptoService;
 use serde::{Serialize, Deserialize};
@@ -96,6 +97,126 @@ pub struct NetworkManager {
     peers: Arc<RwLock<HashMap<ParticipantId, PeerInfo>>>,
     network_layer: Arc<dyn NetworkLayer>,
     message_handlers: Arc<RwLock<HashMap<String, Box<dyn MessageHandler>>>>,
+}
+
+/// Gossip topics for P2P pub/sub
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum GossipTopic {
+    Transactions,
+    Blocks,
+    Status,
+}
+
+/// Gossip service trait for pub/sub dissemination of transactions and blocks
+#[async_trait]
+pub trait GossipService: Send + Sync {
+    async fn publish_transaction(&self, tx: Transaction) -> GarpResult<()>;
+    async fn publish_block(&self, block: Block) -> GarpResult<()>;
+    async fn subscribe_transactions(&self) -> GarpResult<mpsc::Receiver<Transaction>>;
+    async fn subscribe_blocks(&self) -> GarpResult<mpsc::Receiver<Block>>;
+}
+
+/// Simple in-memory gossip router (stub for libp2p or other transports)
+pub struct GossipRouter {
+    tx_sender: mpsc::Sender<Transaction>,
+    tx_receiver: Option<mpsc::Receiver<Transaction>>,
+    block_sender: mpsc::Sender<Block>,
+    block_receiver: Option<mpsc::Receiver<Block>>,
+}
+
+impl GossipRouter {
+    pub fn new(buffer: usize) -> Self {
+        let (tx_s, tx_r) = mpsc::channel(buffer);
+        let (bk_s, bk_r) = mpsc::channel(buffer);
+        Self { tx_sender: tx_s, tx_receiver: Some(tx_r), block_sender: bk_s, block_receiver: Some(bk_r) }
+    }
+}
+
+#[async_trait]
+impl GossipService for GossipRouter {
+    async fn publish_transaction(&self, tx: Transaction) -> GarpResult<()> {
+        self.tx_sender.send(tx).await.map_err(|e| NetworkError::TransportError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn publish_block(&self, block: Block) -> GarpResult<()> {
+        self.block_sender.send(block).await.map_err(|e| NetworkError::TransportError(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn subscribe_transactions(&self) -> GarpResult<mpsc::Receiver<Transaction>> {
+        self.tx_receiver
+            .as_ref()
+            .ok_or_else(|| NetworkError::Internal("transactions receiver already taken".into()))?;
+        // Clone by replacing with a new channel; for stub we transfer ownership once
+        let mut me = self as *const _ as *mut GossipRouter; // unsafe: only for stub to move out Option
+        let recv = unsafe { &mut *me }.tx_receiver.take().unwrap();
+        Ok(recv)
+    }
+
+    async fn subscribe_blocks(&self) -> GarpResult<mpsc::Receiver<Block>> {
+        self.block_receiver
+            .as_ref()
+            .ok_or_else(|| NetworkError::Internal("blocks receiver already taken".into()))?;
+        let mut me = self as *const _ as *mut GossipRouter;
+        let recv = unsafe { &mut *me }.block_receiver.take().unwrap();
+        Ok(recv)
+    }
+}
+
+/// Peer manager trait for connection lifecycle and policies
+#[async_trait]
+pub trait PeerManager: Send + Sync {
+    async fn connect(&self, peer: PeerInfo) -> GarpResult<()>;
+    async fn disconnect(&self, participant_id: &ParticipantId) -> GarpResult<()>;
+    async fn list_peers(&self) -> Vec<PeerInfo>;
+    async fn ban_peer(&self, participant_id: &ParticipantId) -> GarpResult<()>;
+    async fn unban_peer(&self, participant_id: &ParticipantId) -> GarpResult<()>;
+}
+
+/// Simple in-memory peer manager (placeholder)
+pub struct SimplePeerManager {
+    peers: Arc<RwLock<HashMap<ParticipantId, PeerInfo>>>,
+    banned: Arc<RwLock<HashMap<ParticipantId, chrono::DateTime<chrono::Utc>>>>,
+}
+
+impl SimplePeerManager {
+    pub fn new() -> Self {
+        Self { peers: Arc::new(RwLock::new(HashMap::new())), banned: Arc::new(RwLock::new(HashMap::new())) }
+    }
+}
+
+#[async_trait]
+impl PeerManager for SimplePeerManager {
+    async fn connect(&self, peer: PeerInfo) -> GarpResult<()> {
+        let banned = self.banned.read().await;
+        if banned.contains_key(&peer.participant_id) {
+            return Err(NetworkError::PeerBanned(peer.participant_id.0.clone()).into());
+        }
+        drop(banned);
+        self.peers.write().await.insert(peer.participant_id.clone(), peer);
+        Ok(())
+    }
+
+    async fn disconnect(&self, participant_id: &ParticipantId) -> GarpResult<()> {
+        self.peers.write().await.remove(participant_id);
+        Ok(())
+    }
+
+    async fn list_peers(&self) -> Vec<PeerInfo> {
+        self.peers.read().await.values().cloned().collect()
+    }
+
+    async fn ban_peer(&self, participant_id: &ParticipantId) -> GarpResult<()> {
+        self.banned.write().await.insert(participant_id.clone(), chrono::Utc::now());
+        self.peers.write().await.remove(participant_id);
+        Ok(())
+    }
+
+    async fn unban_peer(&self, participant_id: &ParticipantId) -> GarpResult<()> {
+        self.banned.write().await.remove(participant_id);
+        Ok(())
+    }
 }
 
 /// Message handler trait for processing different message types
