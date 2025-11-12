@@ -9,6 +9,7 @@ A distributed blockchain-inspired system with privacy-preserving transaction pro
 - `global-synchronizer` - Coordinates cross-domain settlement and global state sync
 - `common` - Shared Rust library with consensus, crypto, network, and type definitions
 - `backend-go` - Go-based backend service (API or admin interface) with config, middleware, OTel, and storage modules
+- `frontend` - HTML/CSS/JS frontend interface for interacting with the blockchain
 - `k8s` - Kubernetes deployment manifests
 - `.github/workflows` - CI/CD pipeline configurations
 

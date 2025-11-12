@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GARP Blockchain</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">GARP</div>
+            <ul>
+                <li><a href="#home">Home</a></li>
+                <li><a href="#blockchain">Blockchain</a></li>
+                <li><a href="#transactions">Transactions</a></li>
+                <li><a href="#accounts">Accounts</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section id="home" class="hero">
+            <h1>GARP Blockchain Platform</h1>
+            <p>A distributed blockchain-inspired system with privacy-preserving transaction processing</p>
+            <button id="checkHealth">Check Blockchain Status</button>
+            <div id="statusMessage"></div>
+        </section>
+
+        <section id="blockchain" class="content-section">
+            <h2>Blockchain Information</h2>
+            <div id="blockchainInfo">
+                <p>Loading blockchain data...</p>
+            </div>
+        </section>
+
+        <section id="transactions" class="content-section">
+            <h2>Submit Transaction</h2>
+            <form id="transactionForm">
+                <div class="form-group">
+                    <label for="fromAddress">From Address:</label>
+                    <input type="text" id="fromAddress" required>
+                </div>
+                <div class="form-group">
+                    <label for="toAddress">To Address:</label>
+                    <input type="text" id="toAddress" required>
+                </div>
+                <div class="form-group">
+                    <label for="amount">Amount:</label>
+                    <input type="number" id="amount" required>
+                </div>
+                <button type="submit">Submit Transaction</button>
+            </form>
+            <div id="transactionResult"></div>
+        </section>
+
+        <section id="accounts" class="content-section">
+            <h2>Account Information</h2>
+            <div class="form-group">
+                <label for="accountAddress">Account Address:</label>
+                <input type="text" id="accountAddress" placeholder="Enter account address">
+                <button id="getAccount">Get Account Info</button>
+            </div>
+            <div id="accountInfo"></div>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 GARP Blockchain. All rights reserved.</p>
+    </footer>
+
+    <script src="app.js"></script>
+</body>
+</html>
