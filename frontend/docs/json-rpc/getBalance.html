@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>getBalance — GARP JSON-RPC</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">GARP Blockchain</div>
+      <nav class="top-nav">
+        <a href="/">Home</a>
+        <a href="/docs/" class="active">Docs</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <ul class="nav">
+        <li><a href="../index.html#json-rpc">Back to JSON-RPC</a></li>
+      </ul>
+      <div id="methodToc" class="method-toc"></div>
+    </aside>
+    <section class="content">
+      <article id="get-balance">
+        <h1>getBalance</h1>
+        <p>Return the balance for a given participant or account id.</p>
+
+        <h2>Request</h2>
+        <div id="req-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "method": "getBalance",
+  "params": { "participantId": "garp:alice" },
+  "id": 1
+}</code></pre>
+
+        <h2>Response</h2>
+        <div id="res-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "result": 1500,
+  "id": 1
+}</code></pre>
+
+        <h2>Error</h2>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "error": { "code": -32602, "message": "Invalid params" },
+  "id": 1
+}</code></pre>
+
+        <h2>Notes</h2>
+        <ul>
+          <li>Balance may be returned as number or string depending on SDK encoding.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© GARP — Documentation</div>
+  </footer>
+
+  <script>
+    const getBalanceRequestSchema = {
+      title: 'params', type: 'object', properties: {
+        participantId: { type: 'string', description: 'Account or participant identifier' }
+      }
+    };
+    const getBalanceResponseSchema = {
+      title: 'result', description: 'Balance in lamports', type: ['number','string']
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      renderSchema(getBalanceRequestSchema, document.getElementById('req-schema'));
+      renderSchema(getBalanceResponseSchema, document.getElementById('res-schema'));
+    });
+  </script>
+  <script src="../schema.js"></script>
+  <script src="../enhancements.js"></script>
+</body>
+</html>

@@ -110,6 +110,10 @@ pub struct ConsensusConfig {
     
     /// Checkpoint interval
     pub checkpoint_interval: u64,
+    /// Detailed consensus parameters
+    pub params: ConsensusParams,
+    /// Network limits applied to consensus gossip/vote channels
+    pub network_limits: ConsensusNetworkLimits,
 }
 
 /// Consensus algorithm
@@ -129,6 +133,38 @@ pub enum ConsensusAlgorithm {
     
     /// Custom GARP BFT
     GarpBFT,
+}
+
+/// Detailed consensus parameters to drive quorum and view-change decisions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsensusParams {
+    /// Protocol descriptor (e.g., "tendermint-like")
+    pub protocol: String,
+    /// Quorum ratio in thousandths (e.g., 667 => 66.7%)
+    pub quorum_ratio_thousandths: u32,
+    /// Maximum views without progress before view-change
+    pub max_views_without_progress: u32,
+    /// Timeout for view changes in milliseconds
+    pub view_change_timeout_ms: u64,
+    /// Jail duration for validators (seconds) used by adjudication
+    pub jail_duration_secs: u64,
+}
+
+/// Limits applied to consensus network channels
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConsensusNetworkLimits {
+    /// Max messages per second per peer on gossip channel
+    pub gossip_rate_per_peer: u32,
+    /// Max votes per second per peer
+    pub vote_rate_per_peer: u32,
+    /// Burst capacity before backpressure is applied
+    pub burst_capacity: u32,
+    /// Ban list of peers (IDs) that should be dropped/ignored
+    pub ban_list: Vec<String>,
+    /// Enable automatic temporary banning on flood
+    pub enable_auto_ban: bool,
+    /// Temporary ban duration in seconds
+    pub temp_ban_duration_secs: u64,
 }
 
 /// Cross-domain coordination configuration
@@ -727,6 +763,28 @@ impl GlobalSyncConfig {
                         self.consensus.min_validators, min_nodes_for_bft, self.consensus.byzantine_threshold)
             ));
         }
+
+        // Validate extended consensus params
+        if self.consensus.params.quorum_ratio_thousandths == 0 || self.consensus.params.quorum_ratio_thousandths > 1000 {
+            return Err(garp_common::GarpError::ConfigError("quorum_ratio_thousandths must be in (0, 1000]".to_string()));
+        }
+        if self.consensus.params.view_change_timeout_ms == 0 {
+            return Err(garp_common::GarpError::ConfigError("view_change_timeout_ms must be > 0".to_string()));
+        }
+        if self.consensus.params.jail_duration_secs == 0 {
+            return Err(garp_common::GarpError::ConfigError("jail_duration_secs must be > 0".to_string()));
+        }
+
+        // Validate network limits for consensus channels
+        if self.consensus.network_limits.gossip_rate_per_peer == 0 {
+            return Err(garp_common::GarpError::ConfigError("gossip_rate_per_peer must be > 0".to_string()));
+        }
+        if self.consensus.network_limits.vote_rate_per_peer == 0 {
+            return Err(garp_common::GarpError::ConfigError("vote_rate_per_peer must be > 0".to_string()));
+        }
+        if self.consensus.network_limits.burst_capacity == 0 {
+            return Err(garp_common::GarpError::ConfigError("burst_capacity must be > 0".to_string()));
+        }
         
         // Validate database URL
         if self.database.url.is_empty() {
@@ -797,6 +855,21 @@ impl Default for GlobalSyncConfig {
                 byzantine_threshold: 1,
                 enable_fast_path: true,
                 checkpoint_interval: 100,
+                params: ConsensusParams {
+                    protocol: "tendermint-like".to_string(),
+                    quorum_ratio_thousandths: 667,
+                    max_views_without_progress: 3,
+                    view_change_timeout_ms: 5000,
+                    jail_duration_secs: 3600,
+                },
+                network_limits: ConsensusNetworkLimits {
+                    gossip_rate_per_peer: 50,
+                    vote_rate_per_peer: 20,
+                    burst_capacity: 100,
+                    ban_list: vec![],
+                    enable_auto_ban: true,
+                    temp_ban_duration_secs: 600,
+                },
             },
             cross_domain: CrossDomainConfig {
                 known_domains: Vec::new(),

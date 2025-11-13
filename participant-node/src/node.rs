@@ -1,8 +1,12 @@
 use garp_common::{
     ParticipantId, SyncDomainId, Transaction, Contract, Asset, WalletBalance,
-    NetworkMessage, MessageEnvelope, NetworkManager, MessageHandler, PeerInfo,
-    CryptoService, GarpResult, GarpError, NetworkError, ParticipantNodeConfig
+    NetworkMessage, NetworkManager, MessageHandler, PeerInfo,
+    CryptoService, GarpResult, GarpError, NetworkError,
 };
+use garp_common::timing::slot_at_time;
+use crate::consensus::{leader_for_slot, TowerBft, ForkGraph};
+use crate::mempool::{Mempool, MempoolConfig};
+use crate::block_builder::BlockBuilder;
 use crate::{
     config::Config,
     storage::{StorageBackend, Storage},
@@ -12,7 +16,7 @@ use crate::{
     contract_engine::ContractEngine,
 };
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{RwLock, broadcast};
 use tokio::time::{interval, Duration};
 use tracing::{info, warn, error, debug};
 use chrono::Utc;
@@ -40,22 +44,29 @@ pub struct ParticipantNode {
     contract_engine: Arc<ContractEngine>,
     /// Network manager for peer communication
     network: Arc<NetworkManager>,
+    /// Transaction mempool
+    mempool: Arc<Mempool>,
     /// Cryptographic service
     crypto_service: Arc<CryptoService>,
     /// Storage backend
     storage: Arc<dyn StorageBackend>,
-    /// API server
-    api_server: Option<ApiServer>,
+    /// API server (moved to main; retained for future use)
+    /// api_server: Option<ApiServer>,
     /// Message handlers
     message_handlers: Arc<RwLock<HashMap<String, Box<dyn MessageHandler>>>>,
-    /// Shutdown signal
-    shutdown_tx: Option<oneshot::Sender<()>>,
+    /// Shutdown broadcast tx
+    shutdown_tx: Option<broadcast::Sender<()>>,
     /// Latest known global synchronizer head
     global_head: Arc<RwLock<GlobalHead>>,
+    /// Highest finalized slot observed by consensus
+    highest_finalized_slot: Arc<RwLock<u64>>,
     /// Sync last applied height
     sync_last_applied_height: Arc<RwLock<u64>>,
     /// Sync last applied time
     sync_last_applied_time: Arc<RwLock<Option<chrono::DateTime<Utc>>>>,
+    // Consensus state
+    consensus_tower: Arc<RwLock<TowerBft>>,
+    fork_graph: Arc<RwLock<ForkGraph>>,
 }
 
 /// Node status
@@ -82,28 +93,24 @@ pub struct NodeStats {
 impl ParticipantNode {
     /// Create a new participant node
     pub async fn new(config: Config) -> GarpResult<Self> {
-        info!("Initializing Participant Node with ID: {}", config.participant.participant_id.0);
+        info!("Initializing Participant Node with ID: {}", config.participant_config.participant_id.0);
 
         // Initialize crypto service
         let crypto_service = Arc::new(CryptoService::new());
 
         // Initialize storage
-        let storage = if let Some(db_config) = &config.database {
-            Storage::postgres(&db_config.url, db_config.max_connections).await?
-        } else {
-            Storage::memory()
-        };
+        let storage = Storage::postgres(&config.database.url, config.database.max_connections).await?;
 
         // Initialize ledger
         let ledger = Arc::new(LocalLedger::new(
-            config.participant.participant_id.clone(),
+            config.participant_config.participant_id.clone(),
             storage.clone(),
             crypto_service.clone(),
         ));
 
         // Initialize wallet manager
         let wallet = Arc::new(WalletManager::new(
-            config.participant.participant_id.clone(),
+            config.participant_config.participant_id.clone(),
             storage.clone(),
             crypto_service.clone(),
         ));
@@ -114,27 +121,45 @@ impl ParticipantNode {
             crypto_service.clone(),
         ));
 
-        // Initialize network manager
+        // Initialize network manager with real network layer
+        let network_layer = Arc::new(RealNetworkLayer::new(config.network.clone()));
         let network = Arc::new(NetworkManager::new(
-            config.participant.participant_id.clone(),
-            config.participant.network_address.clone(),
+            config.participant_config.participant_id.clone(),
+            crypto_service.clone(),
+            network_layer,
         ));
 
+        // Initialize mempool
+        let mempool = Arc::new(Mempool::new(MempoolConfig::default()));
+
+        // Initialize consensus state (weights from initial balances; default 1)
+        let mut voting_power: HashMap<ParticipantId, u64> = HashMap::new();
+        for v in &config.genesis.initial_validators {
+            let w = *config.genesis.initial_balances.get(v).unwrap_or(&1);
+            voting_power.insert(v.clone(), w);
+        }
+        let consensus_tower = Arc::new(RwLock::new(TowerBft::new(voting_power, 0.667)));
+        let fork_graph = Arc::new(RwLock::new(ForkGraph::new()));
+
         let node = Self {
-            participant_id: config.participant.participant_id.clone(),
+            participant_id: config.participant_config.participant_id.clone(),
             config,
             ledger,
             wallet,
             contract_engine,
             network,
+            mempool,
             crypto_service,
             storage,
-            api_server: None,
+            // api_server: None,
             message_handlers: Arc::new(RwLock::new(HashMap::new())),
             shutdown_tx: None,
             global_head: Arc::new(RwLock::new(GlobalHead { height: 0, hash: String::new() })),
+            highest_finalized_slot: Arc::new(RwLock::new(0)),
             sync_last_applied_height: Arc::new(RwLock::new(0)),
             sync_last_applied_time: Arc::new(RwLock::new(None)),
+            consensus_tower,
+            fork_graph,
         };
 
         Ok(node)
@@ -153,19 +178,7 @@ impl ParticipantNode {
         // Connect to sync domains
         self.connect_to_sync_domains().await?;
 
-        // Start API server if configured
-        if let Some(api_config) = &self.config.api {
-            let api_server = ApiServer::new(
-                api_config.clone(),
-                self.ledger.clone(),
-                self.wallet.clone(),
-                self.contract_engine.clone(),
-                self.crypto_service.clone(),
-            );
-            
-            api_server.start().await?;
-            self.api_server = Some(api_server);
-        }
+        // API server is spawned from main.rs using Arc<ParticipantNode>
 
         // Initialize local head height from file if present
         if let Ok(path) = std::env::var("LOCAL_HEAD_PATH") {
@@ -178,37 +191,60 @@ impl ParticipantNode {
             }
         }
 
+        // Load accounts snapshot if configured
+        if let Ok(acc_path) = std::env::var("ACCOUNTS_SNAPSHOT_PATH") {
+            if std::path::Path::new(&acc_path).exists() {
+                if let Err(e) = self.ledger.load_accounts_snapshot(&acc_path) {
+                    warn!("Failed to load accounts snapshot from {}: {}", acc_path, e);
+                } else {
+                    info!("Loaded accounts snapshot from {}", acc_path);
+                }
+            }
+        }
+
         // Start background tasks
         self.start_background_tasks().await?;
+
+        // Periodic accounts snapshot task
+        if let Ok(acc_path) = std::env::var("ACCOUNTS_SNAPSHOT_PATH") {
+            let ledger = self.ledger.clone();
+            tokio::spawn(async move {
+                let mut ticker = interval(Duration::from_secs(300));
+                loop {
+                    ticker.tick().await;
+                    if let Err(e) = ledger.save_accounts_snapshot(&acc_path) {
+                        warn!("Accounts snapshot save failed: {}", e);
+                    }
+                }
+            });
+            info!("Started periodic accounts snapshot writer");
+        }
 
         info!("Participant Node {} started successfully", self.participant_id.0);
         Ok(())
     }
 
-    /// Stop the participant node
-    pub async fn stop(&mut self) -> GarpResult<()> {
-        info!("Stopping Participant Node {}", self.participant_id.0);
-
-        // Send shutdown signal
-        if let Some(tx) = self.shutdown_tx.take() {
+    /// Gracefully shutdown background tasks
+    pub async fn shutdown(&self) -> GarpResult<()> {
+        info!("Shutting down Participant Node {}", self.participant_id.0);
+        if let Some(tx) = &self.shutdown_tx {
             let _ = tx.send(());
         }
-
-        // Stop API server
-        if let Some(api_server) = &mut self.api_server {
-            api_server.stop().await?;
-        }
-
-        // Stop network manager
-        // Note: NetworkManager would need a stop method in a real implementation
-
-        info!("Participant Node {} stopped", self.participant_id.0);
         Ok(())
     }
 
     pub async fn get_global_head(&self) -> (u64, String) {
         let gh = self.global_head.read().await;
         (gh.height, gh.hash.clone())
+    }
+
+    /// Get this node's participant ID
+    pub fn get_participant_id(&self) -> ParticipantId {
+        self.participant_id.clone()
+    }
+    /// Expose storage for API usage
+    pub fn get_storage(&self) -> Arc<dyn StorageBackend> {
+        self.storage.clone()
     }
     pub fn get_sync_domain_ids(&self) -> Vec<String> {
         self.config.sync_domains.iter().map(|sd| sd.domain_id.0.clone()).collect()
@@ -228,6 +264,11 @@ impl ParticipantNode {
         // Submit to local ledger
         let result = self.ledger.submit_transaction(transaction.clone()).await?;
 
+        // Record a ledger transaction entry with current slot
+        let now = Utc::now();
+        let slot = garp_common::timing::slot_at_time(self.config.genesis.genesis_time, self.config.chain.slot_duration_ms, now);
+        self.ledger.record_transaction_entry(transaction.id.clone(), slot);
+
         // Broadcast to sync domains if valid
         if result.valid {
             self.broadcast_transaction_to_sync_domains(transaction).await?;
@@ -236,9 +277,32 @@ impl ParticipantNode {
         Ok(result)
     }
 
+    /// Submit a transaction to the local mempool with a fee for prioritization
+    pub async fn submit_to_mempool(&self, transaction: Transaction, fee: u64) -> GarpResult<()> {
+        self.mempool.submit(transaction, fee).await
+    }
+
+    /// Retrieve a prioritized batch of transactions for block assembly
+    pub async fn get_mempool_batch(&self, max: usize) -> Vec<Transaction> {
+        self.mempool.get_batch(max).await
+    }
+
     /// Get ledger view for this participant
     pub async fn get_ledger_view(&self) -> GarpResult<LedgerView> {
         self.ledger.get_ledger_view().await
+    }
+
+    /// Simulate TxV2 via ledger interface
+    pub async fn simulate_transaction_v2(&self, tx: &garp_common::TxV2) -> GarpResult<crate::ledger::SimulationResult> {
+        self.ledger.simulate_v2(tx).await
+    }
+    /// Get genesis time and slot duration for timing calculations
+    pub fn get_timing_params(&self) -> (chrono::DateTime<Utc>, u64) {
+        (self.genesis_time, self.slot_duration_ms)
+    }
+    /// Get initial validator set from config
+    pub fn get_validators(&self) -> Vec<ParticipantId> {
+        self.config.genesis.initial_validators.clone()
     }
 
     /// Get node statistics
@@ -286,6 +350,18 @@ impl ParticipantNode {
         );
         handlers.insert("contract".to_string(), Box::new(contract_handler));
 
+        // Consensus message handler
+        let consensus_handler = ConsensusMessageHandler::new(
+            self.participant_id.clone(),
+            self.consensus_tower.clone(),
+            self.fork_graph.clone(),
+            self.ledger.clone(),
+            self.config.chain.slot_duration_ms,
+            self.config.genesis.genesis_time,
+            self.highest_finalized_slot.clone(),
+        );
+        handlers.insert("consensus".to_string(), Box::new(consensus_handler));
+
         Ok(())
     }
 
@@ -293,13 +369,15 @@ impl ParticipantNode {
     async fn connect_to_sync_domains(&self) -> GarpResult<()> {
         for sync_domain in &self.config.sync_domains {
             info!("Connecting to sync domain: {}", sync_domain.domain_id.0);
-            
-            let peer_info = PeerInfo {
-                id: sync_domain.domain_id.0.clone(),
-                address: sync_domain.endpoint.clone(),
-                public_key: sync_domain.public_key.clone(),
-                last_seen: Utc::now(),
-            };
+
+            // Parse endpoint into NetworkAddress
+            let (host, port, protocol) = parse_endpoint(&sync_domain.endpoint);
+            let address = NetworkAddress::new(&host, port, protocol);
+            let peer_info = PeerInfo::new(
+                ParticipantId::new(&sync_domain.domain_id.0),
+                address,
+                sync_domain.public_key.clone(),
+            );
 
             self.network.add_peer(peer_info).await?;
         }
@@ -309,37 +387,29 @@ impl ParticipantNode {
 
     /// Broadcast transaction to sync domains
     async fn broadcast_transaction_to_sync_domains(&self, transaction: Transaction) -> GarpResult<()> {
-        let message = NetworkMessage::Transaction(transaction);
-        let envelope = MessageEnvelope {
-            id: Uuid::new_v4().to_string(),
-            message_type: "transaction".to_string(),
-            sender: self.participant_id.0.clone(),
-            recipient: None, // Broadcast
-            payload: serde_json::to_value(&message)
-                .map_err(|e| NetworkError::SerializationFailed(e.to_string()))?,
-            timestamp: Utc::now(),
-            signature: None, // Would be added by network layer
-        };
-
-        // Send to all sync domains
-        for sync_domain in &self.config.sync_domains {
-            if let Err(e) = self.network.send_message(&sync_domain.domain_id.0, envelope.clone()).await {
-                warn!("Failed to send transaction to sync domain {}: {}", sync_domain.domain_id.0, e);
-            }
+        let msg = NetworkMessage::Transaction(transaction);
+        let recipients: Vec<ParticipantId> = self.config
+            .sync_domains
+            .iter()
+            .map(|sd| ParticipantId::new(&sd.domain_id.0))
+            .collect();
+        if let Err(e) = self.network.broadcast_secure_message(&recipients, &msg).await {
+            warn!("Failed to broadcast transaction to sync domains: {}", e);
         }
-
         Ok(())
     }
 
     /// Start background tasks
-    async fn start_background_tasks(&self) -> GarpResult<()> {
-        let (shutdown_tx, mut shutdown_rx) = oneshot::channel();
-        self.shutdown_tx = Some(shutdown_tx);
+    async fn start_background_tasks(&mut self) -> GarpResult<()> {
+        let (shutdown_tx, _) = broadcast::channel(1);
+        self.shutdown_tx = Some(shutdown_tx.clone());
 
         // Ledger checkpoint task
         let ledger = self.ledger.clone();
         let checkpoint_interval = Duration::from_secs(self.config.participant.checkpoint_interval_seconds);
-        tokio::spawn(async move {
+        tokio::spawn({
+            let mut shutdown_rx = shutdown_tx.subscribe();
+            async move {
             let mut interval = interval(checkpoint_interval);
             loop {
                 tokio::select! {
@@ -348,13 +418,13 @@ impl ParticipantNode {
                             error!("Failed to create ledger checkpoint: {}", e);
                         }
                     }
-                    _ = &mut shutdown_rx => {
+                    _ = shutdown_rx.recv() => {
                         debug!("Checkpoint task shutting down");
                         break;
                     }
                 }
             }
-        });
+        }});
 
         // Sync task: poll global synchronizer for latest block and refresh local checkpoint
         let sync_interval = Duration::from_secs(30); // Sync every 30 seconds
@@ -363,7 +433,9 @@ impl ParticipantNode {
         let ledger_for_sync = self.ledger.clone();
         let sync_last_applied_height = self.sync_last_applied_height.clone();
         let sync_last_applied_time = self.sync_last_applied_time.clone();
-        tokio::spawn(async move {
+        tokio::spawn({
+            let mut shutdown_rx = shutdown_tx.subscribe();
+            async move {
             let mut interval = interval(sync_interval);
             loop {
                 tokio::select! {
@@ -389,13 +461,121 @@ impl ParticipantNode {
                             debug!("SYNCHRONIZER_URL not set; skipping block sync poll");
                         }
                     }
-                    _ = &mut shutdown_rx => {
+                    _ = shutdown_rx.recv() => {
                         debug!("Sync task shutting down");
                         break;
                     }
                 }
             }
+        }});
+
+        // PoH ticker task: tick at ledger-defined cadence per slot
+        let ledger_for_poh = self.ledger.clone();
+        let slot_duration_ms = self.config.chain.slot_duration_ms;
+        let genesis_time = self.config.genesis.genesis_time;
+        tokio::spawn({
+            let mut shutdown_rx = shutdown_tx.subscribe();
+            async move {
+                let mut interval = interval(ledger_for_poh.tick_interval(slot_duration_ms));
+                loop {
+                    tokio::select! {
+                        _ = interval.tick() => {
+                            let now = Utc::now();
+                            let cur_slot = garp_common::timing::slot_at_time(genesis_time, slot_duration_ms, now);
+                            ledger_for_poh.record_poh_tick(cur_slot);
+                        }
+                        _ = shutdown_rx.recv() => {
+                            debug!("PoH ticker task shutting down");
+                            break;
+                        }
+                    }
+                }
+            }
         });
+
+        // Proposer task: assemble blocks from mempool at slot cadence
+        let proposer_id = self.participant_id.clone();
+        let chain = self.config.chain.clone();
+        let genesis = self.config.genesis.clone();
+        let mempool = self.mempool.clone();
+        let network = self.network.clone();
+        let sync_domains = self.config.sync_domains.clone();
+        let global_head = self.global_head.clone();
+        let forks = self.fork_graph.clone();
+        let storage = self.storage.clone();
+        tokio::spawn({
+            let mut shutdown_rx = shutdown_tx.subscribe();
+            async move {
+            let mut interval = interval(Duration::from_millis(chain.slot_duration_ms));
+            let builder = BlockBuilder::new(chain.clone(), genesis.clone());
+            loop {
+                tokio::select! {
+                    _ = interval.tick() => {
+                        // Determine leader for current slot
+                        let now = Utc::now();
+                        let cur_slot = garp_common::timing::slot_at_time(genesis.genesis_time, chain.slot_duration_ms, now);
+                        let leader = crate::consensus::leader_for_slot(cur_slot, &genesis.initial_validators);
+                        if let Some(l) = leader {
+                            if l != proposer_id { continue; }
+                        } else {
+                            // No leader schedule; skip proposing
+                            continue;
+                        }
+                        // Fetch a batch from mempool; skip if empty
+                        let txs = mempool.get_batch(100).await;
+                        if txs.is_empty() { continue; }
+
+                        // Select best-fork parent by cumulative weight
+                        let root_hash = {
+                            let gh = global_head.read().await;
+                            if gh.hash.is_empty() { vec![0u8; 32] } else { gh.hash.as_bytes().to_vec() }
+                        };
+                        let parent_hash = forks.read().await.best_fork(&root_hash).unwrap_or(root_hash);
+
+                        let block = builder.build_block(txs, parent_hash, proposer_id.clone());
+                        info!("Proposed block: slot={} epoch={} txs={} hash={}", block.header.slot, block.header.epoch, block.transactions.len(), hex::encode(&block.hash));
+
+                        // Persist the proposed block
+                        if let Err(e) = storage.store_block(&block).await {
+                            warn!("Failed to persist proposed block: {}", e);
+                        }
+
+                        // Map proposal to block hash and broadcast proposal for voting
+                        let proposal_id = Uuid::new_v4();
+                        forks.write().await.map_proposal(proposal_id, block.hash.clone());
+                        let tx_ids: Vec<garp_common::TransactionId> = block.transactions.iter().map(|t| t.id.clone()).collect();
+                        let proposal_msg = NetworkMessage::ConsensusProposal { proposal_id, transactions: tx_ids, proposer: proposer_id.clone() };
+
+                        // Broadcast the block to sync domains (as JSON payload)
+                        let payload = match serde_json::to_value(&block) {
+                            Ok(v) => v,
+                            Err(e) => { warn!("Failed to serialize block for gossip: {}", e); continue; }
+                        };
+                        let envelope = MessageEnvelope {
+                            id: Uuid::new_v4().to_string(),
+                            message_type: "block".to_string(),
+                            sender: proposer_id.0.clone(),
+                            recipient: None,
+                            payload,
+                            timestamp: Utc::now(),
+                            signature: None,
+                        };
+                        let recipients: Vec<ParticipantId> = sync_domains.iter().map(|sd| ParticipantId::new(&sd.domain_id.0)).collect();
+                        let block_msg = NetworkMessage::Block(block);
+                        if let Err(e) = network.broadcast_secure_message(&recipients, &block_msg).await {
+                            warn!("Failed to broadcast proposed block: {}", e);
+                        }
+                        if let Err(e) = network.broadcast_secure_message(&recipients, &proposal_msg).await {
+                            warn!("Failed to broadcast consensus proposal: {}", e);
+                        }
+                    }
+                    _ = shutdown_rx.recv() => {
+                        debug!("Proposer task shutting down");
+                        break;
+                    }
+                }
+            }
+        }});
 
         Ok(())
     }
@@ -517,6 +697,58 @@ async fn apply_finalized_blocks(base: &str, head: Arc<RwLock<GlobalHead>>, ledge
     pub async fn get_sync_last_applied(&self) -> (u64, Option<chrono::DateTime<Utc>>) {
         (*self.sync_last_applied_height.read().await, self.sync_last_applied_time.read().await.clone())
     }
+
+    /// Public node stats used by API
+    pub async fn get_node_stats(&self) -> GarpResult<PublicNodeStats> {
+        let ledger_stats = self.ledger.get_stats().await?;
+        let net = self.network.get_network_stats().await;
+        let wallet_balances_count = match self.ledger.get_wallet_balance().await? {
+            Some(wb) => wb.assets.len() as u64,
+            None => 0,
+        };
+        let stats = PublicNodeStats {
+            total_transactions: ledger_stats.total_transactions,
+            total_contracts: ledger_stats.total_contracts,
+            active_contracts: ledger_stats.active_contracts,
+            total_assets: ledger_stats.total_assets,
+            wallet_balances: wallet_balances_count,
+            network_peers: net.connected_peers as u64,
+            ledger_stats,
+        };
+        Ok(stats)
+    }
+}
+
+/// Public stats returned by ParticipantNode::get_node_stats and consumed by API
+#[derive(Debug, Clone)]
+pub struct PublicNodeStats {
+    pub total_transactions: u64,
+    pub total_contracts: u64,
+    pub active_contracts: u64,
+    pub total_assets: u64,
+    pub wallet_balances: u64,
+    pub network_peers: u64,
+    pub ledger_stats: LedgerStats,
+}
+
+fn parse_endpoint(endpoint: &str) -> (String, u16, NetworkProtocol) {
+    // Very simple parser: http(s)://host[:port]
+    let mut e = endpoint.trim().to_string();
+    let mut protocol = NetworkProtocol::Http;
+    if let Some(rest) = e.strip_prefix("http://") {
+        e = rest.to_string();
+        protocol = NetworkProtocol::Http;
+    } else if let Some(rest) = e.strip_prefix("https://") {
+        e = rest.to_string();
+        protocol = NetworkProtocol::Https;
+    }
+    let mut host = e.clone();
+    let mut port: u16 = match protocol { NetworkProtocol::Http => 80, NetworkProtocol::Https => 443, _ => 80 };
+    if let Some((h, p)) = e.split_once(':') {
+        host = h.to_string();
+        if let Ok(pp) = p.parse::<u16>() { port = pp; }
+    }
+    (host, port, protocol)
 }
 
 /// Message handler for transaction messages
@@ -600,6 +832,101 @@ impl MessageHandler for ContractMessageHandler {
         // Handle contract-related messages
         // This would include contract execution requests, results, etc.
         
+        Ok(())
+    }
+}
+
+// Consensus messages handler
+struct ConsensusMessageHandler {
+    participant_id: ParticipantId,
+    tower: Arc<RwLock<TowerBft>>,
+    forks: Arc<RwLock<ForkGraph>>,
+    ledger: Arc<LocalLedger>,
+    slot_duration_ms: u64,
+    genesis_time: chrono::DateTime<Utc>,
+    highest_finalized_slot: Arc<RwLock<u64>>, 
+}
+
+impl ConsensusMessageHandler {
+    fn new(
+        participant_id: ParticipantId,
+        tower: Arc<RwLock<TowerBft>>,
+        forks: Arc<RwLock<ForkGraph>>,
+        ledger: Arc<LocalLedger>,
+        slot_duration_ms: u64,
+        genesis_time: chrono::DateTime<Utc>,
+        highest_finalized_slot: Arc<RwLock<u64>>,
+    ) -> Self {
+        Self { participant_id, tower, forks, ledger, slot_duration_ms, genesis_time, highest_finalized_slot }
+    }
+}
+
+#[async_trait::async_trait]
+impl MessageHandler for ConsensusMessageHandler {
+    async fn handle_message(&self, envelope: MessageEnvelope) -> GarpResult<()> {
+        if let Ok(msg) = serde_json::from_value::<NetworkMessage>(envelope.payload.clone()) {
+            match msg {
+                NetworkMessage::ConsensusVote { proposal_id, vote, voter } => {
+                    let now = Utc::now();
+                    let slot = garp_common::timing::slot_at_time(self.genesis_time, self.slot_duration_ms, now);
+                    let mut tower = self.tower.write().await;
+                    let voter_power = tower.voting_power_of(&voter);
+                    let _ = tower.record_vote(slot, &voter, vote);
+
+                    // Accumulate stake-weighted votes into fork graph if proposal maps to a block
+                    if vote {
+                        if let Some(block_hash) = self.forks.read().await.block_hash_for_proposal(&proposal_id).cloned() {
+                            self.forks.write().await.add_votes(&block_hash, voter_power);
+                        }
+                    }
+
+                    if tower.try_finalize(slot) {
+                        debug!("Consensus finalized at slot {}", slot);
+                        let mut hfs = self.highest_finalized_slot.write().await;
+                        if slot > *hfs { *hfs = slot; }
+                    }
+                }
+                NetworkMessage::ConsensusProposal { .. } => {
+                    // Proposal handling can integrate with fork graph in future
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+}
+use crate::network_layer::{NetworkLayer, StubNetworkLayer};
+use garp_common::network::{NetworkAddress, NetworkProtocol, MessageEnvelope};
+
+/// Real network layer implementation
+pub struct RealNetworkLayer {
+    config: crate::config::NetworkConfig,
+}
+
+impl RealNetworkLayer {
+    pub fn new(config: crate::config::NetworkConfig) -> Self {
+        Self { config }
+    }
+}
+
+#[async_trait::async_trait]
+impl NetworkLayer for RealNetworkLayer {
+    async fn send_message(&self, address: &NetworkAddress, message: &MessageEnvelope) -> GarpResult<()> {
+        // Implementation for sending messages over the network
+        // This would use HTTP/gRPC to send messages to other nodes
+        Ok(())
+    }
+
+    async fn broadcast_message(&self, addresses: &[NetworkAddress], message: &MessageEnvelope) -> GarpResult<()> {
+        // Implementation for broadcasting messages to multiple nodes
+        for address in addresses {
+            let _ = self.send_message(address, message).await;
+        }
+        Ok(())
+    }
+
+    async fn listen(&self) -> GarpResult<()> {
+        // Implementation for listening to incoming messages
         Ok(())
     }
 }

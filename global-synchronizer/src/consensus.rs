@@ -7,8 +7,144 @@ use tokio::time::{interval, timeout};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
+use ed25519_dalek::{SigningKey, Signer, Verifier, Signature, PublicKey};
+use hex;
+use garp_common::{ConsensusManager, ConsensusEngineType, ConsensusParams, ValidatorInfo, ValidatorStatus, EvidenceType};
+
+// --- Canonicalization and signing helpers (module-level) ---
+fn node_sign(message: &[u8]) -> Option<Vec<u8>> {
+    let signer = std::env::var("SYNC_SIGNER").unwrap_or_else(|_| "env".to_string());
+    match signer.as_str() {
+        // Future: integrate KMS/Vault/HSM providers here
+        // "vault" | "kms" | "hsm" => {
+        //     tracing::warn!("External signer not yet configured; falling back to env");
+        // }
+        _ => {}
+    }
+    let sk_hex = std::env::var("SYNC_NODE_ED25519_SK_HEX").ok()?;
+    let sk_bytes = match hex::decode(sk_hex) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("Invalid SYNC_NODE_ED25519_SK_HEX: {}", e);
+            return None;
+        }
+    };
+    let arr: [u8; 32] = match sk_bytes.try_into() {
+        Ok(a) => a,
+        Err(_) => {
+            error!("SYNC_NODE_ED25519_SK_HEX must be 32 bytes hex");
+            return None;
+        }
+    };
+    let sk = SigningKey::from_bytes(&arr);
+    let sig = sk.sign(message);
+    Some(sig.to_bytes().to_vec())
+}
+
+fn canonical_proposal_message(p: &ConsensusProposal) -> Vec<u8> {
+    let mut s = String::new();
+    s.push_str(&p.proposal_id);
+    s.push('|');
+    s.push_str(&p.proposer_id.0);
+    s.push('|');
+    s.push_str(&p.view.to_string());
+    s.push('|');
+    s.push_str(&p.timestamp.timestamp_millis().to_string());
+    s.push('|');
+    match &p.proposal_type {
+        ProposalType::Block(b) => {
+            s.push_str(&b.header.height.to_string());
+            s.push('|');
+            s.push_str(&b.header.previous_hash.0);
+            s.push('|');
+            s.push_str(&b.header.merkle_root.0);
+        }
+        ProposalType::TransactionBatch(txs) => {
+            s.push_str("batch:");
+            s.push_str(&txs.len().to_string());
+        }
+        ProposalType::ValidatorSetChange(v) => {
+            s.push_str("vset:");
+            s.push_str(&v.effective_height.to_string());
+        }
+        ProposalType::ConfigurationChange(c) => {
+            s.push_str("cfg:");
+            s.push_str(&c.parameter);
+            s.push('=');
+            s.push_str(&c.value);
+        }
+        ProposalType::EmergencyAction(ea) => {
+            s.push_str("emergency:");
+            s.push_str(&ea.action_type.to_string());
+        }
+    }
+    s.into_bytes()
+}
+
+fn canonical_vote_message(v: &ConsensusVote) -> Vec<u8> {
+    let mut s = String::new();
+    s.push_str(&v.voter_id.0);
+    s.push('|');
+    s.push_str(&v.proposal_id);
+    s.push('|');
+    s.push_str(&format!("{:?}", v.vote_type));
+    s.push('|');
+    s.push_str(if v.vote { "yes" } else { "no" });
+    s.push('|');
+    s.push_str(&v.view.to_string());
+    s.push('|');
+    s.push_str(&v.timestamp.timestamp_millis().to_string());
+    s.into_bytes()
+}
+
+fn canonical_consensus_message(m: &ConsensusMessage) -> Vec<u8> {
+    let mut s = String::new();
+    s.push_str(&m.message_id);
+    s.push('|');
+    s.push_str(&m.sender_id.0);
+    s.push('|');
+    s.push_str(&m.view.to_string());
+    s.push('|');
+    s.push_str(&m.timestamp.timestamp_millis().to_string());
+    s.push('|');
+    s.push_str(match &m.message_type {
+        ConsensusMessageType::Proposal(p) => {
+            let mut inner = String::from("proposal:");
+            inner.push_str(&p.proposal_id);
+            inner
+        }
+        ConsensusMessageType::Vote(v) => {
+            let mut inner = String::from("vote:");
+            inner.push_str(&v.proposal_id);
+            inner
+        }
+        ConsensusMessageType::ViewChange(vc) => {
+            let mut inner = String::from("view_change:");
+            inner.push_str(&vc.new_view.to_string());
+            inner
+        }
+        ConsensusMessageType::NewView(nv) => {
+            let mut inner = String::from("new_view:");
+            inner.push_str(&nv.new_view.to_string());
+            inner
+        }
+        ConsensusMessageType::Heartbeat(hb) => {
+            let mut inner = String::from("heartbeat:");
+            inner.push_str(&hb.current_view.to_string());
+            inner
+        }
+        ConsensusMessageType::SyncRequest(sr) => {
+            let mut inner = String::from("sync_req:");
+            inner.push_str(&sr.start_height.to_string());
+            inner
+        }
+        ConsensusMessageType::SyncResponse(_) => "sync_resp".to_string(),
+    });
+    s.into_bytes()
+}
 
 use garp_common::{GarpResult, GarpError};
+use garp_common::crypto::CryptoService;
 use garp_common::types::{TransactionId, ParticipantId};
 use garp_common::consensus::{ValidationResult};
 
@@ -17,16 +153,16 @@ use crate::cross_domain::{CrossDomainTransaction, CrossDomainTransactionType};
 use crate::storage::{GlobalStorage, GlobalBlock, BlockHeader};
 use crate::validator::{ValidatorInfo, ValidatorStatus};
 use crate::network::NetworkManager;
+use crate::network::InboundMessage;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-struct BlockHashInput {
-    height: u64,
-    previous_hash: String,
-    timestamp: chrono::DateTime<chrono::Utc>,
-    merkle_root: String,
-    transactions: Vec<String>,
-    validator_signatures: usize,
-}
+    struct BlockHashInput {
+        height: u64,
+        previous_hash: String,
+        timestamp: chrono::DateTime<chrono::Utc>,
+        merkle_root: String,
+        transactions: Vec<String>,
+    }
 
 /// BFT Consensus Engine for Global Synchronizer
 pub struct ConsensusEngine {
@@ -34,7 +170,7 @@ pub struct ConsensusEngine {
     config: Arc<GlobalSyncConfig>,
     
     /// Storage layer
-    storage: Arc<dyn GlobalStorage>,
+    storage: Arc<GlobalStorage>,
     
     /// Network manager
     network_manager: Arc<NetworkManager>,
@@ -45,8 +181,8 @@ pub struct ConsensusEngine {
     /// Active consensus sessions
     active_sessions: Arc<RwLock<HashMap<String, ConsensusSession>>>,
     
-    /// Validator set
-    validator_set: Arc<RwLock<ValidatorSet>>,
+    /// Consensus manager with pluggable engines and validator management
+    consensus_manager: Arc<ConsensusManager>,
     
     /// Message queue
     message_queue: Arc<Mutex<VecDeque<ConsensusMessage>>>,
@@ -542,7 +678,7 @@ pub struct ConsensusMetricsSnapshot {
 impl ConsensusEngine {
     /// Create new consensus engine
     pub async fn new(config: Arc<GlobalSyncConfig>) -> GarpResult<Self> {
-        let storage = Arc::new(crate::storage::MemoryGlobalStorage::new());
+        let storage = Arc::new(crate::storage::GlobalStorage::new(config.clone()).await?);
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await?);
         
         let consensus_state = Arc::new(RwLock::new(ConsensusState {
@@ -556,13 +692,27 @@ impl ConsensusEngine {
             last_updated: Instant::now(),
         }));
         
-        let validator_set = Arc::new(RwLock::new(ValidatorSet {
-            validators: HashMap::new(),
-            total_voting_power: 0,
+        // Initialize consensus manager with Tendermint consensus as default for BFT
+        let consensus_params = ConsensusParams {
+            timeout_seconds: config.consensus_timeout().as_secs(),
+            threshold: 0.67,
+            max_validators: 100,
+            min_validators: 1,
+            weighted_voting: true,
+            require_unanimous: false,
+            allow_abstain: false,
+            max_concurrent_sessions: 1000,
             byzantine_threshold: config.consensus.byzantine_threshold,
-            required_votes: 0,
-            last_updated: Instant::now(),
-        }));
+            quorum_ratio_thousandths: 667,
+            max_view_changes: 10,
+            liveness_timeout_ms: 10000,
+        };
+        
+        let consensus_manager = Arc::new(ConsensusManager::new(
+            ParticipantId::new(config.node.node_id.clone()),
+            ConsensusEngineType::Tendermint,
+            consensus_params
+        ));
         
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let event_rx = Arc::new(Mutex::new(event_rx));
@@ -583,7 +733,7 @@ impl ConsensusEngine {
             network_manager,
             consensus_state,
             active_sessions: Arc::new(RwLock::new(HashMap::new())),
-            validator_set,
+            consensus_manager,
             message_queue: Arc::new(Mutex::new(VecDeque::new())),
             event_tx,
             event_rx,
@@ -598,6 +748,151 @@ impl ConsensusEngine {
         
         // Initialize validator set
         self.initialize_validator_set().await?;
+
+        // Register inbound consensus message handler with signature verification
+        let validator_set = self.validator_set.clone();
+        let active_sessions = self.active_sessions.clone();
+        let consensus_state = self.consensus_state.clone();
+        let metrics = self.metrics.clone();
+        self.network_manager.register_message_handler(
+            "consensus".to_string(),
+            move |inbound: &InboundMessage| {
+                let data = inbound.data.clone();
+                let validator_set = validator_set.clone();
+                let active_sessions = active_sessions.clone();
+                let consensus_state = consensus_state.clone();
+                let metrics = metrics.clone();
+                tokio::spawn(async move {
+                    // Parse consensus message
+                    let parsed: Result<ConsensusMessage, serde_json::Error> = serde_json::from_slice(&data);
+                    let message = match parsed {
+                        Ok(m) => m,
+                        Err(e) => {
+                            error!("Invalid consensus message JSON: {}", e);
+                            return;
+                        }
+                    };
+
+                    // Resolve sender's public key
+                    let sender_id = message.sender_id.clone();
+                    let public_key_hex = {
+                        let vs = validator_set.read().await;
+                        vs.validators.get(&sender_id).map(|vi| vi.public_key_hex.clone())
+                    };
+                    let public_key_hex = match public_key_hex {
+                        Some(h) => h,
+                        None => {
+                            warn!("Consensus message from unknown validator: {}", sender_id.0);
+                            return;
+                        }
+                    };
+
+                    // Build ed25519 public key
+                    let pk_bytes = match hex::decode(&public_key_hex) {
+                        Ok(b) => b,
+                        Err(e) => {
+                            warn!("Invalid validator public key hex: {}", e);
+                            return;
+                        }
+                    };
+                    let pk_arr: [u8; 32] = match pk_bytes.try_into() {
+                        Ok(a) => a,
+                        Err(_) => {
+                            warn!("Validator public key length is not 32 bytes");
+                            return;
+                        }
+                    };
+                    let pk = match PublicKey::from_bytes(&pk_arr) {
+                        Ok(pk) => pk,
+                        Err(e) => {
+                            warn!("Invalid ed25519 public key: {}", e);
+                            return;
+                        }
+                    };
+
+                    // Verify envelope signature
+                    let env_sig_arr: [u8; 64] = match message.signature.clone().try_into() {
+                        Ok(a) => a,
+                        Err(_) => {
+                            warn!("Consensus envelope signature length is not 64 bytes");
+                            return;
+                        }
+                    };
+                    let env_sig = match Signature::from_bytes(&env_sig_arr) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!("Invalid envelope signature: {}", e);
+                            return;
+                        }
+                    };
+                    let env_bytes = canonical_consensus_message(&message);
+                    if let Err(e) = pk.verify_strict(&env_bytes, &env_sig) {
+                        warn!("Consensus envelope signature verification failed: {}", e);
+                        return;
+                    }
+
+                    // Dispatch based on message type and verify inner signatures
+                    match message.message_type {
+                        ConsensusMessageType::Proposal(p) => {
+                            if p.proposer_id != sender_id {
+                                warn!("Proposal sender mismatch: envelope {} vs proposal {}", sender_id.0, p.proposer_id.0);
+                                return;
+                            }
+                            let sig_arr: [u8; 64] = match p.signature.clone().try_into() {
+                                Ok(a) => a,
+                                Err(_) => {
+                                    warn!("Proposal signature length is not 64 bytes");
+                                    return;
+                                }
+                            };
+                            let sig = match Signature::from_bytes(&sig_arr) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    warn!("Invalid proposal signature: {}", e);
+                                    return;
+                                }
+                            };
+                            let msg_bytes = canonical_proposal_message(&p);
+                            if let Err(e) = pk.verify_strict(&msg_bytes, &sig) {
+                                warn!("Proposal signature verification failed: {}", e);
+                                return;
+                            }
+                            Self::handle_proposal_received(p, &active_sessions, &consensus_state, &metrics, &validator_set).await;
+                        }
+                        ConsensusMessageType::Vote(v) => {
+                            if v.voter_id != sender_id {
+                                warn!("Vote sender mismatch: envelope {} vs vote {}", sender_id.0, v.voter_id.0);
+                                return;
+                            }
+                            let sig_arr: [u8; 64] = match v.signature.clone().try_into() {
+                                Ok(a) => a,
+                                Err(_) => {
+                                    warn!("Vote signature length is not 64 bytes");
+                                    return;
+                                }
+                            };
+                            let sig = match Signature::from_bytes(&sig_arr) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    warn!("Invalid vote signature: {}", e);
+                                    return;
+                                }
+                            };
+                            let msg_bytes = canonical_vote_message(&v);
+                            if let Err(e) = pk.verify_strict(&msg_bytes, &sig) {
+                                warn!("Vote signature verification failed: {}", e);
+                                return;
+                            }
+                            Self::handle_vote_received(v, &active_sessions, &consensus_state, &metrics).await;
+                        }
+                        other => {
+                            debug!("Inbound consensus message ignored for now: {:?}", other);
+                        }
+                    }
+                });
+                Ok(())
+            }
+        ).await?;
         
         // Start message processor
         let message_processor = self.start_message_processor().await?;
@@ -685,7 +980,7 @@ impl ConsensusEngine {
         let is_valid = self.validate_block(&block).await?;
         
         // Create vote
-        let vote = ConsensusVote {
+        let mut vote = ConsensusVote {
             voter_id: self.get_node_id().await,
             proposal_id,
             vote_type: VoteType::Prepare,
@@ -693,8 +988,16 @@ impl ConsensusEngine {
             reason: if is_valid { None } else { Some("Block validation failed".to_string()) },
             view: self.get_current_view().await,
             timestamp: chrono::Utc::now(),
-            signature: Vec::new(), // TODO: Sign vote
+            signature: Vec::new(),
         };
+
+        // Sign vote (end-to-end)
+        let vote_bytes = canonical_vote_message(&vote);
+        if let Some(sig) = node_sign(&vote_bytes) {
+            vote.signature = sig;
+        } else {
+            warn!("No node signing key configured; broadcasting unsigned vote");
+        }
         
         // Broadcast vote
         self.broadcast_vote(vote).await?;
@@ -730,6 +1033,30 @@ impl ConsensusEngine {
             last_committed_block: state.last_committed_block,
         })
     }
+
+    /// List current validators
+    pub async fn list_validators(&self) -> GarpResult<Vec<ValidatorInfo>> {
+        Ok(self.consensus_manager.get_active_validators().await)
+    }
+
+    /// Add a validator to the set
+    pub async fn add_validator(&self, v: ValidatorInfo) -> GarpResult<()> {
+        self.consensus_manager.add_validator(v).await
+    }
+
+    /// Remove a validator from the set
+    pub async fn remove_validator(&self, id: ParticipantId) -> GarpResult<()> {
+        self.consensus_manager.remove_validator(&id).await
+    }
+
+    /// Update a validator's status
+    pub async fn update_validator_status(&self, id: ParticipantId, status: ValidatorStatus) -> GarpResult<()> {
+        self.consensus_manager.update_validator_status(&id, status).await
+    }
+
+    fn calculate_required_votes(total_voting_power: u64) -> usize {
+        ((total_voting_power as f64 * 0.67).ceil() as u64) as usize
+    }
     
     /// Get node ID
     async fn get_node_id(&self) -> ParticipantId {
@@ -743,22 +1070,21 @@ impl ConsensusEngine {
         // Add initial validators from config
         for peer in &self.config.consensus.cluster_peers {
             let validator = ValidatorInfo {
-                validator_id: ParticipantId::new(peer.clone()),
-                public_key: Vec::new(), // TODO: Load from config
+                id: ParticipantId::new(peer.clone()),
+                public_key_hex: String::new(), // TODO: Load from config
                 voting_power: 1,
                 status: ValidatorStatus::Active,
-                endpoint: peer.clone(),
-                last_seen: Instant::now(),
+                joined_at: chrono::Utc::now(),
                 metadata: HashMap::new(),
             };
             
-            validator_set.validators.insert(validator.validator_id.clone(), validator);
+            validator_set.validators.insert(validator.id.clone(), validator);
             validator_set.total_voting_power += 1;
         }
         
-        // Calculate required votes (2f+1 for BFT)
+        // Calculate required votes using quorum params over validator count
         let total_validators = validator_set.validators.len();
-        validator_set.required_votes = (2 * validator_set.byzantine_threshold) + 1;
+        validator_set.required_votes = self.config.params.required_votes(total_validators);
         
         info!("Initialized validator set with {} validators", total_validators);
         Ok(())
@@ -767,7 +1093,7 @@ impl ConsensusEngine {
     /// Validate block
     async fn validate_block(&self, block: &GlobalBlock) -> GarpResult<bool> {
         // Basic validation
-        if block.header.height == 0 {
+        if block.header.slot == 0 {
             return Ok(false);
         }
         
@@ -780,7 +1106,7 @@ impl ConsensusEngine {
         
         // Validate block hash
         let calculated_hash = self.calculate_block_hash(block).await?;
-        if calculated_hash != block.header.block_hash {
+        if calculated_hash != hex::encode(&block.hash) {
             return Ok(false);
         }
         
@@ -824,8 +1150,7 @@ impl ConsensusEngine {
         }
         
         // Check minimum required confirmations
-        let validator_set = self.validator_set.read().await;
-        let required_confirmations = (validator_set.validators.len() * 2) / 3 + 1; // 2/3 + 1 majority
+        let required_confirmations = self.consensus_manager.get_required_votes().await;
         if transaction.required_confirmations < required_confirmations {
             warn!("Insufficient required confirmations: got {}, minimum {}", 
                   transaction.required_confirmations, required_confirmations);
@@ -925,55 +1250,54 @@ impl ConsensusEngine {
     
     /// Calculate block hash using SHA-256
     async fn calculate_block_hash(&self, block: &GlobalBlock) -> GarpResult<String> {
-        debug!("Calculating hash for block: {}", block.header.height);
+        debug!("Calculating hash for block: epoch={}, slot={}", block.header.epoch, block.header.slot);
         
         // Create a deterministic representation of the block for hashing
         let hash_input = BlockHashInput {
-            height: block.header.height,
-            previous_hash: block.header.previous_hash.clone(),
-            timestamp: block.header.timestamp,
-            merkle_root: block.header.merkle_root.clone(),
-            transactions: block.transactions.iter().map(|tx| tx.transaction_id.clone()).collect(),
-            validator_signatures: block.signatures.len(),
+            height: block.header.slot,
+            previous_hash: hex::encode(&block.header.parent_hash),
+            timestamp: block.timestamp,
+            merkle_root: hex::encode(&block.header.tx_root),
+            transactions: block.transactions.iter().map(|tx| tx.id.0.to_string()).collect(),
         };
         
         // Serialize the hash input
         let serialized = bincode::serialize(&hash_input)
             .map_err(|e| GarpError::Internal(format!("Block serialization failed: {}", e)))?;
         
-        // Get crypto service from storage and calculate hash
-        match self.storage.get_crypto_service().await {
-            Ok(crypto_service) => {
-                let hash_bytes = crypto_service.hash(&serialized);
-                let hash_hex = hex::encode(hash_bytes);
-                debug!("Calculated block hash: {}", hash_hex);
-                Ok(hash_hex)
-            }
-            Err(_) => {
-                // Fallback to simple hash calculation
-                use std::collections::hash_map::DefaultHasher;
-                use std::hash::{Hash, Hasher};
-                
-                let mut hasher = DefaultHasher::new();
-                hash_input.hash(&mut hasher);
-                let hash = hasher.finish();
-                let hash_hex = format!("{:016x}", hash);
-                debug!("Calculated fallback block hash: {}", hash_hex);
-                Ok(hash_hex)
-            }
-        }
+        // Calculate hash using the common CryptoService (SHA-256)
+        let crypto_service = CryptoService::new();
+        let hash_bytes = crypto_service.hash(&serialized);
+        let hash_hex = hex::encode(hash_bytes);
+        debug!("Calculated block hash: {}", hash_hex);
+        Ok(hash_hex)
     }
     
     /// Broadcast proposal
     async fn broadcast_proposal(&self, proposal: ConsensusProposal) -> GarpResult<()> {
-        let message = ConsensusMessage {
+        // Sign proposal itself
+        let mut proposal = proposal;
+        let proposal_bytes = canonical_proposal_message(&proposal);
+        if let Some(sig) = node_sign(&proposal_bytes) {
+            proposal.signature = sig;
+        } else {
+            warn!("No node signing key configured; broadcasting unsigned proposal");
+        }
+
+        let mut message = ConsensusMessage {
             message_id: Uuid::new_v4().to_string(),
             message_type: ConsensusMessageType::Proposal(proposal),
             sender_id: self.get_node_id().await,
             view: self.get_current_view().await,
             timestamp: chrono::Utc::now(),
-            signature: Vec::new(), // TODO: Sign message
+            signature: Vec::new(),
         };
+
+        // Sign envelope
+        let envelope_bytes = canonical_consensus_message(&message);
+        if let Some(sig) = node_sign(&envelope_bytes) {
+            message.signature = sig;
+        }
         
         self.network_manager.broadcast_consensus_message(message).await?;
         Ok(())
@@ -981,14 +1305,22 @@ impl ConsensusEngine {
     
     /// Broadcast vote
     async fn broadcast_vote(&self, vote: ConsensusVote) -> GarpResult<()> {
-        let message = ConsensusMessage {
+        let mut message = ConsensusMessage {
             message_id: Uuid::new_v4().to_string(),
             message_type: ConsensusMessageType::Vote(vote),
             sender_id: self.get_node_id().await,
             view: self.get_current_view().await,
             timestamp: chrono::Utc::now(),
-            signature: Vec::new(), // TODO: Sign message
+            signature: Vec::new(),
         };
+
+        // Sign envelope
+        let envelope_bytes = canonical_consensus_message(&message);
+        if let Some(sig) = node_sign(&envelope_bytes) {
+            message.signature = sig;
+        } else {
+            warn!("No node signing key configured; broadcasting unsigned vote envelope");
+        }
         
         self.network_manager.broadcast_consensus_message(message).await?;
         Ok(())
@@ -997,9 +1329,11 @@ impl ConsensusEngine {
     /// Start message processor
     async fn start_message_processor(&self) -> GarpResult<tokio::task::JoinHandle<()>> {
         let event_rx = self.event_rx.clone();
+        let event_tx = self.event_tx.clone();
         let active_sessions = self.active_sessions.clone();
         let consensus_state = self.consensus_state.clone();
         let validator_set = self.validator_set.clone();
+        let storage = self.storage.clone();
         let metrics = self.metrics.clone();
         
         let handle = tokio::spawn(async move {
@@ -1013,6 +1347,7 @@ impl ConsensusEngine {
                             &active_sessions,
                             &consensus_state,
                             &metrics,
+                            &validator_set,
                         ).await;
                     }
                     
@@ -1023,6 +1358,93 @@ impl ConsensusEngine {
                             &validator_set,
                             &metrics,
                         ).await;
+
+                        // After processing the vote, check if approval consensus was reached
+                        // and persist a finality certificate for block proposals.
+                        {
+                            let sessions = active_sessions.read().await;
+                            if let Some(session) = sessions.get(&vote.proposal_id) {
+                                let approve_votes = session
+                                    .votes
+                                    .values()
+                                    .filter(|v| v.vote)
+                                    .count();
+                                let required_votes = session.required_votes;
+
+                                if approve_votes >= required_votes {
+                                    if let ProposalType::Block(block) = &session.proposal.proposal_type {
+                                        let height = block.header.slot;
+                                        let block_hash_hex = hex::encode(&block.hash);
+
+                                        let signatures = session
+                                            .votes
+                                            .values()
+                                            .filter(|v| v.vote)
+                                            .map(|v| (v.voter_id.clone(), v.signature.clone()))
+                                            .collect::<Vec<(ParticipantId, Vec<u8>)>>();
+
+                                        let vset_power = {
+                                            let vs = validator_set.read().await;
+                                            vs.total_voting_power
+                                        };
+                                        let vset_hash = format!(
+                                            "vset-{:#x}",
+                                            blake3::hash(vset_power.to_le_bytes().as_slice())
+                                        );
+
+                                        let certificate = FinalityCertificate {
+                                            height,
+                                            block_hash: block_hash_hex.clone(),
+                                            signatures,
+                                            validator_set_hash: vset_hash,
+                                            timestamp: chrono::Utc::now(),
+                                        };
+
+                                        if let Err(e) = storage.store_finality_certificate(certificate).await {
+                                            error!(
+                                                "Failed to store finality certificate for block {}: {}",
+                                                block_hash_hex,
+                                                e
+                                            );
+                                        } else {
+                                            info!(
+                                                "Stored finality certificate for block {} at height {}",
+                                                block_hash_hex,
+                                                height
+                                            );
+
+                                            // Emit a ConsensusReached event with minimal proof data for block approvals
+                                            let approving_votes: Vec<ConsensusVote> = session
+                                                .votes
+                                                .values()
+                                                .filter(|v| v.vote)
+                                                .cloned()
+                                                .collect();
+                                            let validators: Vec<ParticipantId> = approving_votes
+                                                .iter()
+                                                .map(|v| v.voter_id.clone())
+                                                .collect();
+                                            let proof = ConsensusProof {
+                                                proposal_id: session.proposal.proposal_id.clone(),
+                                                view: session.view,
+                                                votes: approving_votes,
+                                                aggregated_signature: Vec::new(),
+                                            };
+                                            let result = ConsensusResult {
+                                                transaction_id: format!("block:{}", block_hash_hex),
+                                                approved: true,
+                                                proof,
+                                                validators,
+                                                finalized_at: Instant::now(),
+                                            };
+                                            if let Err(e) = event_tx.send(ConsensusEvent::ConsensusReached(result)) {
+                                                warn!("Failed to emit ConsensusReached event: {}", e);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     
                     ConsensusEvent::ViewChangeInitiated(new_view) => {
@@ -1054,18 +1476,25 @@ impl ConsensusEngine {
         active_sessions: &Arc<RwLock<HashMap<String, ConsensusSession>>>,
         consensus_state: &Arc<RwLock<ConsensusState>>,
         metrics: &Arc<ConsensusMetrics>,
+        validator_set: &Arc<RwLock<ValidatorSet>>,
     ) {
         debug!("Handling proposal: {}", proposal.proposal_id);
         
         // Create or update session
         let session_id = proposal.proposal_id.clone();
+        // Fetch current required votes from validator set
+        let rv = {
+            let vs = validator_set.read().await;
+            vs.required_votes
+        };
+
         let session = ConsensusSession {
             session_id: session_id.clone(),
             proposal: proposal.clone(),
             phase: ConsensusPhase::Prepare,
             view: proposal.view,
             votes: HashMap::new(),
-            required_votes: 3, // TODO: Get from validator set
+            required_votes: rv,
             timeout_at: Instant::now() + Duration::from_secs(30),
             created_at: Instant::now(),
             last_activity: Instant::now(),
@@ -1099,8 +1528,7 @@ impl ConsensusEngine {
             session.last_activity = Instant::now();
             
             // Check if consensus reached
-            let validator_set = validator_set.read().await;
-            let required_votes = validator_set.required_votes;
+            let required_votes = validator_set.get_required_votes().await;
             
             let approve_votes = session.votes.values().filter(|v| v.vote).count();
             let reject_votes = session.votes.values().filter(|v| !v.vote).count();
@@ -1114,6 +1542,9 @@ impl ConsensusEngine {
                     let mut successful = metrics.successful_consensus.write().await;
                     *successful += 1;
                 }
+                
+                // Record successful proposal for validator
+                let _ = validator_set.record_successful_proposal(&vote.voter_id).await;
             } else if reject_votes >= required_votes {
                 // Consensus reached - rejected
                 info!("Consensus reached for proposal: {} (rejected)", vote.proposal_id);
@@ -1123,6 +1554,12 @@ impl ConsensusEngine {
                     let mut failed = metrics.failed_consensus.write().await;
                     *failed += 1;
                 }
+                
+                // Record failed proposal for validator
+                let _ = validator_set.record_failed_proposal(&vote.voter_id).await;
+            } else {
+                // Record vote for validator
+                let _ = validator_set.record_missed_vote(&vote.voter_id).await;
             }
         }
     }
@@ -1334,5 +1771,145 @@ mod tests {
         
         let success_rate = metrics.get_success_rate().await;
         assert_eq!(success_rate, 0.8);
+    }
+}
+// -----------------------------------------------------------------------------
+// Consensus protocol specification, finality, evidence, and slashing scaffolding
+// -----------------------------------------------------------------------------
+
+/// Supported consensus protocol flavors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ConsensusProtocol {
+    /// Raft-style leader-based consensus (non-Byzantine, crash-fault tolerant)
+    Raft,
+    /// Tendermint-like BFT (Byzantine-fault tolerant, with votes and commits)
+    TendermintLike,
+}
+
+/// Parameters that influence quorum, view changes, and liveness.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConsensusParams {
+    pub protocol: ConsensusProtocol,
+    /// Quorum ratio in thousandths (e.g., 667 => 2/3 supermajority)
+    pub quorum_ratio_thousandths: u16,
+    /// Maximum consecutive view changes before declaring an epoch incident
+    pub max_view_changes: u32,
+    /// Liveness timeout in milliseconds to trigger a view change
+    pub liveness_timeout_ms: u64,
+}
+
+/// DoS/backpressure limits for the consensus networking layer.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ConsensusNetworkLimits {
+    pub max_message_rate_per_sec: u32,
+    pub max_peer_connections: u32,
+    pub max_inflight_votes: u32,
+}
+
+/// Finality certificate proving a block reached the required threshold.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FinalityCertificate {
+    pub height: u64,
+    pub block_hash: String,
+    pub signatures: Vec<(garp_common::types::ParticipantId, Vec<u8>)>,
+    pub validator_set_hash: String,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// Evidence for slashing conditions.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum EvidenceType {
+    Equivocation,   // Conflicting votes for the same height/view
+    DoubleSign,     // Two different blocks signed at same height/view
+    LivenessFault,  // Missed N consecutive rounds beyond policy threshold
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Evidence {
+    pub validator: garp_common::types::ParticipantId,
+    pub evidence_type: EvidenceType,
+    pub details: String,
+    pub height: u64,
+    pub view: u64,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
+/// Slashing policy parameters.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SlashingPolicy {
+    pub double_sign_penalty_bp: u32, // basis points of stake/voting power
+    pub equivocation_penalty_bp: u32,
+    pub liveness_penalty_bp: u32,
+    pub jail_duration_secs: u64,
+}
+
+impl ConsensusParams {
+    /// Calculate required votes for a given validator set size.
+    pub fn required_votes(&self, total_validators: usize) -> usize {
+        // quorum_ratio_thousandths e.g., 667 => ceil(2/3 * N)
+        let num = (self.quorum_ratio_thousandths as usize) * total_validators;
+        let denom = 1000usize;
+        (num + denom - 1) / denom
+    }
+}
+
+impl ConsensusEngine {
+    /// Returns required votes based on provided params and current validator set.
+    pub fn compute_required_votes_with(&self, params: &ConsensusParams) -> usize {
+        let total = self.validator_set.validators.len();
+        params.required_votes(total)
+    }
+
+    /// Suggests whether a view change should occur given inactivity and params.
+    pub fn should_view_change(&self, params: &ConsensusParams, inactive_ms: u64, consecutive_view_changes: u32) -> bool {
+        inactive_ms >= params.liveness_timeout_ms || consecutive_view_changes >= params.max_view_changes
+    }
+
+    /// Submits evidence to be adjudicated; returns whether it was accepted.
+    pub async fn submit_evidence(&self, evidence: Evidence) -> garp_common::GarpResult<bool> {
+        // TODO: persist evidence, broadcast to peers, and throttle per limits
+        // For now, accept all syntactically valid evidence.
+        let _ = evidence;
+        Ok(true)
+    }
+
+    /// Applies slashing according to policy; updates validator status and power.
+    pub async fn adjudicate_evidence(&self, evidence: Evidence, policy: SlashingPolicy) -> garp_common::GarpResult<()> {
+        // Convert policy penalties to evidence type
+        let penalty_bp = match evidence.evidence_type {
+            EvidenceType::DoubleSign => policy.double_sign_penalty_bp,
+            EvidenceType::Equivocation => policy.equivocation_penalty_bp,
+            EvidenceType::LivenessFault => policy.liveness_penalty_bp,
+            EvidenceType::InvalidBehavior => 15, // Default penalty for invalid behavior
+        };
+        
+        // Apply slashing through consensus manager
+        self.consensus_manager
+            .apply_slashing(
+                &evidence.validator, 
+                evidence.evidence_type, 
+                penalty_bp, 
+                evidence.details
+            )
+            .await
+    }
+
+    /// Forges a finality certificate from collected signatures for a block.
+    pub fn forge_finality_certificate(&self, height: u64, block_hash: String, sigs: Vec<(garp_common::types::ParticipantId, Vec<u8>)>) -> FinalityCertificate {
+        let vset_hash = format!("vset-{:#x}", blake3::hash(self.validator_set.total_voting_power.to_le_bytes().as_slice()));
+        FinalityCertificate {
+            height,
+            block_hash,
+            signatures: sigs,
+            validator_set_hash: vset_hash,
+            timestamp: chrono::Utc::now(),
+        }
+    }
+
+    /// Simple fork-choice: prefer chain with higher height, then by certificate signatures count.
+    pub fn fork_choice(&self, current: &FinalityCertificate, candidate: &FinalityCertificate) -> &FinalityCertificate {
+        if candidate.height > current.height { return candidate; }
+        if candidate.height < current.height { return current; }
+        if candidate.signatures.len() >= current.signatures.len() { candidate } else { current }
     }
 }

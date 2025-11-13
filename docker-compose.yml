@@ -138,10 +138,14 @@ services:
       BACKEND_URL: http://backend-go:8081
       PARTICIPANT_URL: http://participant-node:8090
       JWT_SECRET: dev-secret
+      REDIS_URL: redis://redis:6379
+      RATE_LIMIT_RPM: 100
     depends_on:
       backend-go:
         condition: service_started
       participant-node:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
   # Frontend service

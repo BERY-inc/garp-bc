@@ -173,6 +173,8 @@ pub enum ECommerceTransaction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum NetworkMessage {
     TransactionSubmission(Transaction),
+    /// New submission supporting accounts model and compute budgets
+    TransactionSubmissionV2(TxV2),
     TransactionValidation {
         transaction_id: TransactionId,
         validation_result: ValidationResult,
@@ -287,4 +289,77 @@ impl fmt::Display for TransactionId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)
     }
+}
+
+// -----------------------------
+// Accounts-as-state transaction model (V2)
+// -----------------------------
+
+/// Unique identifier for accounts (state objects holding lamports and data)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct AccountId(pub String);
+
+/// Program identifier (owner of accounts and executable code)
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ProgramId(pub String);
+
+/// Recent blockhash used for anti-replay (Solana-style)
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecentBlockhash(pub Vec<u8>);
+
+/// Durable nonce reference for long-lived transactions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DurableNonce {
+    pub nonce: Vec<u8>,
+    pub authority: AccountId,
+}
+
+/// Account metadata describing access pattern for an instruction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AccountMeta {
+    pub account: AccountId,
+    pub is_signer: bool,
+    pub is_writable: bool,
+}
+
+/// Compute budget requested by a transaction
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ComputeBudget {
+    pub max_units: u64,
+    pub heap_bytes: u32,
+}
+
+/// Program instruction in the V2 transaction model
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProgramInstruction {
+    pub program: ProgramId,
+    pub accounts: Vec<AccountMeta>,
+    pub data: Vec<u8>,
+}
+
+/// Redesigned transaction supporting accounts-as-state and compute budgets
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TxV2 {
+    pub id: TransactionId,
+    pub fee_payer: AccountId,
+    pub signatures: Vec<Signature>,
+    pub recent_blockhash: RecentBlockhash,
+    pub slot: u64,
+    pub durable_nonce: Option<DurableNonce>,
+    pub compute_budget: Option<ComputeBudget>,
+    pub account_keys: Vec<AccountId>,
+    pub instructions: Vec<ProgramInstruction>,
+    pub created_at: DateTime<Utc>,
+}
+
+impl AccountId {
+    pub fn new(id: &str) -> Self { Self(id.into()) }
+}
+
+impl ProgramId {
+    pub fn new(id: &str) -> Self { Self(id.into()) }
+}
+
+impl RecentBlockhash {
+    pub fn new(hash: Vec<u8>) -> Self { Self(hash) }
 }

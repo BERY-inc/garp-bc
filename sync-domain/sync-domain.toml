@@ -15,3 +15,13 @@ redis_url = "redis://localhost:6379"
 
 [logging]
 level = "info"
+
+[genesis]
+chain_id = "garp-devnet"
+genesis_time = "2024-01-01T00:00:00Z"
+initial_validators = ["participant-1"]
+
+[chain]
+slot_duration_ms = 1000
+epoch_length = 60
+rotation_interval_slots = 60

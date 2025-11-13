@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
 
 use garp_common::{GarpResult, GarpError};
-use garp_common::types::{TransactionId, ParticipantId, DomainId};
+use garp_common::types::{TransactionId, ParticipantId};
 
 use crate::config::GlobalSyncConfig;
-use crate::storage::{GlobalStorage, GlobalBlock};
+use crate::storage::{GlobalStorage, GlobalBlock, DomainId};
 use crate::network::NetworkManager;
 use crate::cross_domain::{CrossDomainTransaction, DomainConfirmation, ConfirmationStatus};
 use crate::consensus::{ConsensusEngine, ConsensusResult};
@@ -22,7 +22,7 @@ pub struct SettlementEngine {
     config: Arc<GlobalSyncConfig>,
     
     /// Storage layer
-    storage: Arc<dyn GlobalStorage>,
+    storage: Arc<GlobalStorage>,
     
     /// Network manager
     network_manager: Arc<NetworkManager>,
@@ -534,7 +534,7 @@ impl SettlementEngine {
     /// Create new settlement engine
     pub async fn new(
         config: Arc<GlobalSyncConfig>,
-        storage: Arc<dyn GlobalStorage>,
+        storage: Arc<GlobalStorage>,
         network_manager: Arc<NetworkManager>,
         consensus_engine: Arc<ConsensusEngine>,
     ) -> GarpResult<Self> {
@@ -1261,13 +1261,13 @@ impl SettlementMetrics {
 mod tests {
     use super::*;
     use crate::config::GlobalSyncConfig;
-    use crate::storage::MemoryGlobalStorage;
+    use crate::storage::GlobalStorage;
     use crate::cross_domain::CrossDomainTransactionType;
     
     #[tokio::test]
     async fn test_settlement_engine_creation() {
         let config = Arc::new(GlobalSyncConfig::default());
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(config.clone()).await.unwrap());
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await.unwrap());
         let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await.unwrap());
         
@@ -1284,7 +1284,7 @@ mod tests {
     #[tokio::test]
     async fn test_settlement_request() {
         let config = Arc::new(GlobalSyncConfig::default());
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(config.clone()).await.unwrap());
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await.unwrap());
         let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await.unwrap());
         
@@ -1296,9 +1296,9 @@ mod tests {
         ).await.unwrap();
         
         let transaction = CrossDomainTransaction {
-            transaction_id: TransactionId::new("test-tx".to_string()),
-            source_domain: DomainId::new("source".to_string()),
-            target_domains: vec![DomainId::new("target".to_string())],
+            transaction_id: TransactionId::new(),
+            source_domain: "source".to_string(),
+            target_domains: vec!["target".to_string()],
             transaction_type: CrossDomainTransactionType::AssetTransfer {
                 asset_id: "test-asset".to_string(),
                 amount: 100,

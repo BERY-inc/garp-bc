@@ -1,4 +1,4 @@
-use garp_common::{ParticipantConfig, ParticipantId, SyncDomainId, GarpResult, GarpError};
+use garp_common::{ParticipantConfig, ParticipantId, SyncDomainId, GarpResult, GarpError, GenesisConfig, ChainParams};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -9,6 +9,11 @@ pub struct Config {
     pub api: ApiConfig,
     pub sync_domains: Vec<SyncDomainConfig>,
     pub security: SecurityConfig,
+    pub network: NetworkConfig,
+    #[serde(default)]
+    pub genesis: GenesisConfig,
+    #[serde(default)]
+    pub chain: ChainParams,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +51,17 @@ pub struct SecurityConfig {
     pub encryption_enabled: bool,
     pub signature_required: bool,
     pub trusted_peers: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    pub listen_address: String,
+    pub listen_port: u16,
+    pub bootstrap_peers: Vec<String>,
+    pub max_peers: u32,
+    pub enable_tls: bool,
+    pub tls_cert_file: Option<String>,
+    pub tls_key_file: Option<String>,
 }
 
 impl Config {
@@ -137,6 +153,23 @@ impl Config {
             return Err(GarpError::Config("Private key cannot be empty".to_string()));
         }
 
+        // Genesis and chain parameter sanity checks
+        if self.genesis.chain_id.trim().is_empty() {
+            return Err(GarpError::Config("Chain ID cannot be empty".to_string()));
+        }
+        if self.genesis.initial_validators.is_empty() {
+            return Err(GarpError::Config("Initial validators cannot be empty".to_string()));
+        }
+        if self.chain.slot_duration_ms == 0 {
+            return Err(GarpError::Config("slot_duration_ms must be > 0".to_string()));
+        }
+        if self.chain.epoch_length == 0 {
+            return Err(GarpError::Config("epoch_length must be > 0".to_string()));
+        }
+        if self.chain.rotation_interval_slots == 0 {
+            return Err(GarpError::Config("rotation_interval_slots must be > 0".to_string()));
+        }
+
         Ok(())
     }
 }
@@ -178,6 +211,27 @@ impl Default for Config {
                 encryption_enabled: true,
                 signature_required: true,
                 trusted_peers: Vec::new(),
+            },
+            network: NetworkConfig {
+                listen_address: "0.0.0.0".to_string(),
+                listen_port: 8090,
+                bootstrap_peers: Vec::new(),
+                max_peers: 100,
+                enable_tls: false,
+                tls_cert_file: None,
+                tls_key_file: None,
+            },
+            genesis: GenesisConfig {
+                chain_id: "garp-devnet".to_string(),
+                genesis_time: chrono::Utc::now(),
+                initial_validators: vec![ParticipantId::new("participant-1")],
+                initial_balances: std::collections::HashMap::new(),
+            },
+            chain: ChainParams {
+                slot_duration_ms: 1000,
+                epoch_length: 60,
+                randomness_beacon: None,
+                rotation_interval_slots: 60,
             },
         }
     }

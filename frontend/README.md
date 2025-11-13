@@ -39,3 +39,32 @@ Or using the docker-compose.yml file in the root directory:
 ```bash
 docker-compose up frontend
 ```
+
+## Documentation Site
+
+- The documentation is served under the `/docs` path.
+- Files are located at `frontend/docs/` (e.g., `index.html`, `styles.css`, `script.js`).
+- When running via Docker or docker-compose, navigate to `http://localhost/docs/`.
+
+### Local Preview (without Docker)
+
+You can open `frontend/docs/index.html` directly in your browser for a quick preview, or run a simple local server:
+
+```bash
+# PowerShell (Windows)
+cd frontend/docs
+python -m http.server 8088
+# Then open http://localhost:8088/
+```
+
+### Nginx Routing
+
+The Nginx config includes a `/docs/` location block that serves the docs and falls back to `index.html` for nested paths:
+
+```
+location /docs/ {
+  alias /usr/share/nginx/html/docs/;
+  index index.html;
+  try_files $uri $uri/ /docs/index.html;
+}
+```

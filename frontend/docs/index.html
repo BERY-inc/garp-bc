@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GARP Docs</title>
+  <link rel="stylesheet" href="./styles.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">GARP Blockchain</div>
+      <nav class="top-nav">
+        <a href="/">Home</a>
+        <a href="/docs/" class="active">Docs</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="search">
+        <input id="searchInput" type="text" placeholder="Search docs" />
+        <div id="searchResults" class="search-results"></div>
+      </div>
+      <div class="section-title">Docs</div>
+      <ul class="nav">
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#getting-started">Getting Started</a></li>
+        <li><a href="#sdks">SDKs</a></li>
+        <li><a href="#json-rpc">JSON-RPC</a></li>
+        <li><a href="#validator-guide">Validator Guide</a></li>
+        <li><a href="#node-ops">Node Ops</a></li>
+        <li><a href="#examples">Examples</a></li>
+      </ul>
+      <div class="section-title">Methods</div>
+      <ul class="nav">
+        <li><a href="./json-rpc/getBlock.html">getBlock</a></li>
+        <li><a href="./json-rpc/simulateTransaction.html">simulateTransaction</a></li>
+        <li><a href="./json-rpc/sendTransaction.html">sendTransaction</a></li>
+        <li><a href="./json-rpc/getBalance.html">getBalance</a></li>
+        <li><a href="./json-rpc/getSlotLeader.html">getSlotLeader</a></li>
+      </ul>
+    </aside>
+
+    <section class="content">
+      <div class="hero">
+        <h1>GARP Documentation</h1>
+        <p>Clean, fast, and developer-friendly guides to build on GARP.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#getting-started">Get Started</a>
+          <a class="btn" href="#json-rpc">JSON-RPC</a>
+        </div>
+      </div>
+      <article id="overview">
+        <h1>Overview</h1>
+        <p>
+          GARP is a modular blockchain with participant nodes, consensus (TowerBFT), and a Solana-like JSON-RPC surface.
+          This documentation introduces core concepts, APIs, SDKs, and validator operations.
+        </p>
+        <ul>
+          <li>Participant node exposes `POST /rpc` with batch support and standardized errors.</li>
+          <li>SDKs available in JavaScript/TypeScript, Rust, Python, and Go.</li>
+          <li>Global Synchronizer coordinates cross-domain state (see `global-synchronizer`).</li>
+        </ul>
+      </article>
+
+      <article id="getting-started">
+        <h2>Getting Started</h2>
+        <h3>Run a local participant node</h3>
+        <pre><code>cargo run -p participant-node -- --api_port 8080 --participant_id your-id --database_url sqlite://./garp.db</code></pre>
+        <p>Once running, call the RPC endpoint:</p>
+        <pre><code>curl -X POST http://localhost:8080/rpc \
+ -H "Content-Type: application/json" \
+ -d '{"jsonrpc":"2.0","method":"getHealth","id":1}'</code></pre>
+      </article>
+
+      <article id="sdks">
+        <h2>SDKs</h2>
+        <p>Connect to a participant node using the official SDKs.</p>
+        <h3>JavaScript / TypeScript</h3>
+        <pre><code>npm install garp-sdk
+
+import { GarpClient } from "garp-sdk";
+const client = new GarpClient("http://localhost:8080/rpc", {
+  retries: 2,
+  timeoutMs: 8000,
+});
+const slot = await client.getSlot();
+console.log(slot);
+</code></pre>
+        <h3>Rust</h3>
+        <pre><code>use garp_sdk::GarpClient;
+
+let client = GarpClient::new("http://localhost:8080/rpc");
+let slot = client.get_slot().await?;
+println!("{}", slot);
+</code></pre>
+        <h3>Python</h3>
+        <pre><code>from garp_sdk import GarpClient
+
+client = GarpClient("http://localhost:8080/rpc", timeout=8.0)
+slot = client.get_slot()
+print(slot)
+</code></pre>
+        <h3>Go</h3>
+        <pre><code>client := garp.NewClient("http://localhost:8080/rpc")
+slot, err := client.GetSlot()
+if err != nil { panic(err) }
+fmt.Println(slot)
+</code></pre>
+      </article>
+
+      <article id="json-rpc">
+        <h2>JSON-RPC</h2>
+        <p>Endpoint: `POST /rpc`</p>
+        <p>Supports single and batch requests, returns JSON-RPC 2.0 responses.</p>
+        <h3>Common Methods</h3>
+        <ul>
+          <li>`getSlot` → current slot number</li>
+          <li>`getSlotLeader` → leader identity for a given/current slot</li>
+          <li>`getBlock` → block by `slot` or `hash`</li>
+          <li>`getTransaction` → transaction by `signature`</li>
+          <li>`sendTransaction` → submit a `TransactionCommand`</li>
+          <li>`simulateTransaction` → dry-run and get logs</li>
+          <li>`getBalance` → wallet balance for `participantId`</li>
+          <li>`getVersion`, `getHealth` → node info and health</li>
+        </ul>
+        <h3>Error Format</h3>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "error": { "code": -32602, "message": "Invalid params" },
+  "id": 1
+}</code></pre>
+        <p>
+          Codes follow JSON-RPC: `-32600` invalid request, `-32601` method not found,
+          `-32602` invalid params, `-32603` internal error, `-32000` server error.
+        </p>
+      </article>
+
+      <article id="validator-guide">
+        <h2>Validator Guide</h2>
+        <ol>
+          <li>Generate and securely store your validator identity keys.</li>
+          <li>Coordinate inclusion in the validator set (network config/governance).</li>
+          <li>Configure sync domains and peer connectivity.</li>
+          <li>Run the node with sufficient CPU, RAM, SSD, and bandwidth.</li>
+          <li>Monitor `getSlot`, `getSlotLeader`, local head height, and mempool.</li>
+        </ol>
+        <pre><code>cargo run -p participant-node -- --api_port 8080 \
+  --participant_id your-id --database_url sqlite://./garp.db</code></pre>
+      </article>
+
+      <article id="node-ops">
+        <h2>Node Ops</h2>
+        <ul>
+          <li>Auth: set `PARTICIPANT_API_TOKEN` to enable Bearer token checks.</li>
+          <li>Rate limiting, request size limits and CORS are configured via Tower layers.</li>
+          <li>Snapshots: `LOCAL_HEAD_PATH` can seed local head on boot; optional accounts snapshot.</li>
+          <li>Expose RPC behind TLS (Nginx), monitor with logs and health endpoints.</li>
+        </ul>
+      </article>
+
+      <article id="examples">
+        <h2>Examples</h2>
+        <p>Batch RPC request:</p>
+        <pre><code>curl -X POST http://localhost:8080/rpc \
+ -H "Content-Type: application/json" \
+ -d '[
+   {"jsonrpc":"2.0","method":"getSlot","id":1},
+   {"jsonrpc":"2.0","method":"getHealth","id":2}
+ ]'</code></pre>
+        <h3>Method Pages</h3>
+        <p>Detailed schemas and examples:</p>
+        <div class="card-grid">
+          <div class="card">
+            <a href="./json-rpc/getBlock.html">getBlock</a>
+            <p>Fetch block by slot or hash.</p>
+          </div>
+          <div class="card">
+            <a href="./json-rpc/simulateTransaction.html">simulateTransaction</a>
+            <p>Dry-run a transaction and get logs.</p>
+          </div>
+          <div class="card">
+            <a href="./json-rpc/sendTransaction.html">sendTransaction</a>
+            <p>Submit a transaction command.</p>
+          </div>
+          <div class="card">
+            <a href="./json-rpc/getBalance.html">getBalance</a>
+            <p>Query an account’s balance.</p>
+          </div>
+          <div class="card">
+            <a href="./json-rpc/getSlotLeader.html">getSlotLeader</a>
+            <p>Return leader identity for a slot.</p>
+          </div>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© GARP — Documentation</div>
+  </footer>
+
+  <script src="./script.js"></script>
+  <script src="https://unpkg.com/lunr/lunr.min.js"></script>
+  <script src="./enhancements.js"></script>
+</body>
+</html>

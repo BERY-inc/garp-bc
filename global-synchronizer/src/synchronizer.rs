@@ -38,7 +38,7 @@ pub struct GlobalSynchronizer {
     network_manager: Arc<NetworkManager>,
     
     /// Storage layer
-    storage: Arc<dyn GlobalStorage>,
+    storage: Arc<GlobalStorage>,
     
     /// Domain discovery
     domain_discovery: Arc<DomainDiscovery>,
@@ -303,16 +303,27 @@ impl GlobalSynchronizer {
     /// Create new global synchronizer
     pub async fn new(
         config: GlobalSyncConfig,
-        storage: Arc<dyn GlobalStorage>,
+        storage: Arc<GlobalStorage>,
     ) -> GarpResult<Self> {
         let config = Arc::new(config);
         
         // Initialize components
-        let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await?);
-        let cross_domain_coordinator = Arc::new(CrossDomainCoordinator::new(config.clone()).await?);
-        let settlement_engine = Arc::new(SettlementEngine::new(config.clone(), storage.clone()).await?);
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await?);
+        let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await?);
         let domain_discovery = Arc::new(DomainDiscovery::new(config.clone()).await?);
+        let settlement_engine = Arc::new(SettlementEngine::new(
+            config.clone(),
+            storage.clone(),
+            network_manager.clone(),
+            consensus_engine.clone(),
+        ).await?);
+        let cross_domain_coordinator = Arc::new(CrossDomainCoordinator::new(
+            config.clone(),
+            storage.clone(),
+            network_manager.clone(),
+            domain_discovery.clone(),
+            consensus_engine.clone(),
+        ).await?);
         let validator_manager = Arc::new(ValidatorManager::new(config.clone()).await?);
         let metrics = Arc::new(GlobalSyncMetrics::new());
         
@@ -641,7 +652,8 @@ impl GlobalSynchronizer {
         pending_blocks: &Arc<RwLock<HashMap<String, PendingBlock>>>,
         consensus_engine: &Arc<ConsensusEngine>,
     ) {
-        let block_id = block.header.block_id.clone();
+        // Use canonical block hash (hex-encoded) as the block identifier
+        let block_id = hex::encode(&block.hash);
         let required_votes = consensus_engine.get_required_votes().await;
         
         let pending_block = PendingBlock {
@@ -670,38 +682,35 @@ impl GlobalSynchronizer {
         storage: &Arc<GlobalStorage>,
     ) {
         let mut state = state.write().await;
-        state.block_height = block.header.height;
-        state.last_block_hash = block.header.block_hash.clone();
+        // Align with canonical fields: slot as height, hex-encoded hash for display/state
+        state.block_height = block.header.slot;
+        state.last_block_hash = hex::encode(&block.hash);
         state.last_updated = Instant::now();
         
         metrics.increment_blocks_finalized().await;
-        metrics.update_block_height(block.header.height).await;
+        metrics.update_block_height(block.header.slot).await;
 
         // Persist finalized block into storage
-        let block_hash = block.header.block_hash.clone();
+        let block_hash = block.hash.clone();
         // Build BlockInfo from the finalized block
-        // Convert header timestamp (chrono) to SystemTime
-        let ts = block.header.timestamp;
+        // Convert block timestamp (chrono) to SystemTime
+        let ts = block.timestamp;
         let timestamp = std::time::UNIX_EPOCH
             + std::time::Duration::from_secs(ts.timestamp() as u64);
 
-        // Compute a simple state_root from transaction IDs (placeholder)
-        let mut hasher = blake3::Hasher::new();
-        for tx in &block.transactions {
-            hasher.update(tx.transaction_id.0.as_bytes());
-        }
-        let state_root_bytes = hasher.finalize().as_bytes().to_vec();
+        // Use canonical header fields
+        let state_root_bytes = block.header.state_root.clone();
 
         let info = crate::storage::BlockInfo {
             block_hash: block_hash.clone(),
-            height: block.header.height,
-            parent_hash: block.header.previous_hash.clone(),
+            height: block.header.slot,
+            parent_hash: block.header.parent_hash.clone(),
             transaction_count: block.transactions.len() as u32,
             size: bincode::serialize(&block).map(|b| b.len()).unwrap_or(0),
             timestamp,
             difficulty: 0,
             nonce: 0,
-            merkle_root: hex::decode(&block.header.merkle_root).unwrap_or_default(),
+            merkle_root: block.header.tx_root.clone(),
             state_root: state_root_bytes,
             metadata: std::collections::HashMap::new(),
         };
@@ -709,14 +718,59 @@ impl GlobalSynchronizer {
             error!("Failed to store finalized block: {}", e);
         }
 
+        // Try to load and log the finality certificate for this block
+        let block_hash_hex = hex::encode(&block_hash);
+        match storage.get_finality_certificate_by_height(block.header.slot).await {
+            Ok(Some(cert)) => {
+                info!(
+                    "Finality certificate found for block {} (height {}), validators: {}",
+                    block_hash_hex,
+                    cert.height,
+                    cert.signatures.len()
+                );
+            }
+            Ok(None) => {
+                match storage.get_finality_certificate_by_hash(block_hash_hex.clone()).await {
+                    Ok(Some(cert)) => {
+                        info!(
+                            "Finality certificate found by hash for block {} (height {}), validators: {}",
+                            block_hash_hex,
+                            cert.height,
+                            cert.signatures.len()
+                        );
+                    }
+                    Ok(None) => {
+                        debug!(
+                            "No finality certificate recorded yet for block {}",
+                            block_hash_hex
+                        );
+                    }
+                    Err(e) => {
+                        error!(
+                            "Error fetching finality certificate by hash for {}: {}",
+                            block_hash_hex,
+                            e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                error!(
+                    "Error fetching finality certificate by height {}: {}",
+                    block.header.slot,
+                    e
+                );
+            }
+        }
+
         // Tag transactions in this block with height/hash and record index
         let tx_ids: Vec<TransactionId> = block
             .transactions
             .iter()
-            .map(|t| t.transaction_id.clone())
+            .map(|t| t.id.clone())
             .collect();
-        if let Err(e) = storage.assign_block_transactions(block.header.height, block_hash.clone(), &tx_ids).await {
-            error!("Failed to assign transactions to block {}: {}", block.header.height, e);
+        if let Err(e) = storage.assign_block_transactions(block.header.slot, block_hash.clone(), &tx_ids).await {
+            error!("Failed to assign transactions to block {}: {}", block.header.slot, e);
         }
     }
     
@@ -885,12 +939,13 @@ impl Default for PerformanceMetrics {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::MemoryGlobalStorage;
+    use crate::storage::GlobalStorage;
+    use crate::config::GlobalSyncConfig;
     
     #[tokio::test]
     async fn test_global_synchronizer_creation() {
         let config = GlobalSyncConfig::default();
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(Arc::new(config.clone())).await.unwrap());
         
         let synchronizer = GlobalSynchronizer::new(config, storage).await;
         assert!(synchronizer.is_ok());
@@ -899,18 +954,24 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_submission() {
         let config = GlobalSyncConfig::default();
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(Arc::new(config.clone())).await.unwrap());
         
         let synchronizer = GlobalSynchronizer::new(config, storage).await.unwrap();
         
         let transaction = CrossDomainTransaction {
             transaction_id: TransactionId::new(),
             source_domain: "domain1".to_string(),
-            target_domain: "domain2".to_string(),
-            participating_domains: vec!["domain1".to_string(), "domain2".to_string()],
-            transaction_data: vec![1, 2, 3, 4],
-            metadata: HashMap::new(),
+            target_domains: vec!["domain2".to_string()],
+            transaction_type: crate::cross_domain::CrossDomainTransactionType::AssetTransfer { asset_id: "asset".into(), amount: 1, from_address: "a".into(), to_address: "b".into() },
+            data: vec![1, 2, 3, 4],
+            dependencies: vec![],
+            required_confirmations: 1,
+            confirmations: HashMap::new(),
+            status: crate::cross_domain::TransactionStatus::Pending,
             created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            timeout_at: chrono::Utc::now(),
+            metadata: HashMap::new(),
         };
         
         let result = synchronizer.submit_transaction(transaction).await;
@@ -920,7 +981,7 @@ mod tests {
     #[tokio::test]
     async fn test_state_management() {
         let config = GlobalSyncConfig::default();
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(Arc::new(config.clone())).await.unwrap());
         
         let synchronizer = GlobalSynchronizer::new(config, storage).await.unwrap();
         

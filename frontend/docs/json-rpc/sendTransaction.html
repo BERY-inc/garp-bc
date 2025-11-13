@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>sendTransaction — GARP JSON-RPC</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">GARP Blockchain</div>
+      <nav class="top-nav">
+        <a href="/">Home</a>
+        <a href="/docs/" class="active">Docs</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <ul class="nav">
+        <li><a href="../index.html#json-rpc">Back to JSON-RPC</a></li>
+      </ul>
+      <div id="methodToc" class="method-toc"></div>
+    </aside>
+    <section class="content">
+      <article id="send-transaction">
+        <h1>sendTransaction</h1>
+        <p>Submit a transaction command to the participant node for processing.</p>
+
+        <h2>Request</h2>
+        <div id="req-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "method": "sendTransaction",
+  "params": {
+    "command": { "type": "transfer", "from": "garp:alice", "to": "garp:bob", "lamports": 1000 }
+  },
+  "id": 1
+}</code></pre>
+
+        <h2>Response</h2>
+        <div id="res-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "result": {
+    "signature": "5Yk...",
+    "status": "Submitted"
+  },
+  "id": 1
+}</code></pre>
+
+        <h2>Error</h2>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "error": { "code": -32000, "message": "Transaction rejected" },
+  "id": 1
+}</code></pre>
+
+        <h2>Notes</h2>
+        <ul>
+          <li>Ensure accounts and signatures are valid; malformed commands may be rejected.</li>
+          <li>Use SDK helpers to build commands where possible.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© GARP — Documentation</div>
+  </footer>
+
+  <script>
+    const sendTxRequestSchema = {
+      title: 'params', type: 'object', properties: {
+        command: {
+          type: 'object', description: 'Transaction command', properties: {
+            type: { type: 'string' },
+            from: { type: 'string' },
+            to: { type: 'string' },
+            lamports: { type: 'number' }
+          }
+        }
+      }
+    };
+    const sendTxResponseSchema = {
+      title: 'result', type: 'object', properties: {
+        signature: { type: 'string' },
+        status: { type: 'string' }
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      renderSchema(sendTxRequestSchema, document.getElementById('req-schema'));
+      renderSchema(sendTxResponseSchema, document.getElementById('res-schema'));
+    });
+  </script>
+  <script src="../schema.js"></script>
+  <script src="../enhancements.js"></script>
+</body>
+</html>

@@ -13,6 +13,21 @@ port = 8000
 port = 7000
 cluster_peers = ["localhost:7000", "localhost:7001", "localhost:7002"]
 
+[consensus.params]
+protocol = "tendermint-like"
+quorum_ratio_thousandths = 667
+max_views_without_progress = 3
+view_change_timeout_ms = 5000
+jail_duration_secs = 3600
+
+[consensus.network_limits]
+gossip_rate_per_peer = 50
+vote_rate_per_peer = 20
+burst_capacity = 100
+ban_list = []
+enable_auto_ban = true
+temp_ban_duration_secs = 600
+
 [kafka]
 bootstrap_servers = ["localhost:9092"]
 

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>simulateTransaction — GARP JSON-RPC</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">GARP Blockchain</div>
+      <nav class="top-nav">
+        <a href="/">Home</a>
+        <a href="/docs/" class="active">Docs</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <ul class="nav">
+        <li><a href="../index.html#json-rpc">Back to JSON-RPC</a></li>
+      </ul>
+      <div id="methodToc" class="method-toc"></div>
+    </aside>
+    <section class="content">
+      <article id="simulate-transaction">
+        <h1>simulateTransaction</h1>
+        <p>Dry-run a transaction command and return execution logs and effects.</p>
+
+        <h2>Request</h2>
+        <div id="req-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "method": "simulateTransaction",
+  "params": {
+    "command": {
+      "type": "transfer",
+      "from": "garp:alice",
+      "to": "garp:bob",
+      "lamports": 1000
+    }
+  },
+  "id": 1
+}</code></pre>
+
+        <h2>Response</h2>
+        <div id="res-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "result": {
+    "logs": [
+      "invoke transfer",
+      "debit alice: 1000",
+      "credit bob: 1000"
+    ],
+    "accounts": {
+      "garp:alice": { "pre": 10000, "post": 9000 },
+      "garp:bob": { "pre": 500, "post": 1500 }
+    },
+    "ok": true
+  },
+  "id": 1
+}</code></pre>
+
+        <h2>Error</h2>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "error": { "code": -32603, "message": "Simulation failed" },
+  "id": 1
+}</code></pre>
+
+        <h2>Notes</h2>
+        <ul>
+          <li>Simulation does not commit changes; it estimates execution effects and logs.</li>
+          <li>Exact fields may expand as schemas are standardized; consult SDK types when available.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© GARP — Documentation</div>
+  </footer>
+
+  <script>
+    const simulateRequestSchema = {
+      title: 'params', type: 'object', properties: {
+        command: {
+          type: 'object', description: 'Transaction command', properties: {
+            type: { type: 'string', description: 'e.g., transfer' },
+            from: { type: 'string' },
+            to: { type: 'string' },
+            lamports: { type: 'number' }
+          }
+        }
+      }
+    };
+    const simulateResponseSchema = {
+      title: 'result', type: 'object', properties: {
+        logs: { type: 'array', items: { type: 'string', title: 'log' } },
+        accounts: { type: 'object', description: 'Pre/Post balances' },
+        ok: { type: 'boolean' }
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      renderSchema(simulateRequestSchema, document.getElementById('req-schema'));
+      renderSchema(simulateResponseSchema, document.getElementById('res-schema'));
+    });
+  </script>
+  <script src="../schema.js"></script>
+  <script src="../enhancements.js"></script>
+</body>
+</html>

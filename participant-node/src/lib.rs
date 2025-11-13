@@ -12,6 +12,17 @@ pub mod secure_execution;
 pub mod private_state;
 pub mod private_transactions;
 pub mod wasm_runtime;
+pub mod contract_state;
+pub mod contract_testing;
+pub mod contract_debug;
+pub mod contract_compiler;
+pub mod contract_stdlib;
+pub mod mempool;
+pub mod block_builder;
+pub mod merkle;
+pub mod state_commitments;
+pub mod consensus;
+pub mod poh;
 
 pub use node::ParticipantNode;
 pub use config::Config;
@@ -26,3 +37,10 @@ pub use secure_execution::{SecureExecutionEnvironment, IsolationLevel, ResourceL
 pub use private_state::{PrivateStateManager, StateOperation, PrivacyLevel, StateOperationResult};
 pub use private_transactions::{PrivateTransactionProcessor, PrivateTransaction, DisclosurePolicy, SelectiveDisclosureManager};
 pub use wasm_runtime::{WasmRuntime, WasmInstance, WasmExecutionResult, WasmHostFunctions};
+pub use contract_compiler::ContractCompiler;
+pub use contract_stdlib::{StdlibContext, StdlibResult};
+pub use mempool::{Mempool, MempoolConfig, MempoolEntry};
+pub use block_builder::BlockBuilder;
+pub use merkle::{MerkleProof, merkle_root, merkle_proof, verify_proof};
+pub use state_commitments::{StateChangeItem, derive_state_changes, leaves_for_changes, state_root_from_changes};
+pub use consensus::{leader_for_slot, TowerBft, ForkGraph};

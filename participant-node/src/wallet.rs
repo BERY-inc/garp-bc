@@ -541,3 +541,27 @@ impl ToString for AssetType {
         }
     }
 }
+// -----------------------------------------------------------------------------
+// Wallet flows: key management, signing, and broadcast (scaffolding)
+// -----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WalletAccount {
+    pub account_id: String,
+    pub public_key_hex: String,
+    pub nonce: u64,
+}
+
+/// Placeholder: derive an account from a seed. In production, use KMS/HSM.
+pub fn derive_account_from_seed(seed_hex: &str, account_id: &str) -> Result<WalletAccount, String> {
+    if seed_hex.is_empty() { return Err("seed required".into()); }
+    // Do not keep private keys in memory in production.
+    let pk = blake3::hash(seed_hex.as_bytes());
+    Ok(WalletAccount { account_id: account_id.to_string(), public_key_hex: hex::encode(pk.as_bytes()), nonce: 0 })
+}
+
+/// Placeholder: sign bytes. In production, offload to KMS/HSM.
+pub fn sign_bytes(_account_id: &str, _message: &[u8]) -> Result<Vec<u8>, String> {
+    // Intentionally not implementing private key handling here.
+    Err("signing not implemented; use KMS/HSM".into())
+}

@@ -1,5 +1,5 @@
 use clap::{Arg, Command};
-use global_synchronizer::{GlobalSynchronizer, config::GlobalSyncConfig, api::create_router};
+use global_synchronizer::{GlobalSynchronizer, config::GlobalSyncConfig, api::create_router, consensus_example};
 use std::sync::Arc;
 use axum::Router;
 use tracing::{info, error};
@@ -139,6 +139,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Cluster peers: {:?}", config.consensus.cluster_peers);
     info!("API port: {}", config.api.port);
     info!("Consensus port: {}", config.consensus.port);
+    
+    // Demonstrate the new consensus system
+    info!("Demonstrating new consensus system...");
+    tokio::spawn(async {
+        consensus_example::consensus_manager_example().await;
+        consensus_example::consensus_engine_examples().await;
+        consensus_example::reputation_scoring_example();
+    });
 
     // Create global synchronizer
     let global_sync = match GlobalSynchronizer::new(config).await {

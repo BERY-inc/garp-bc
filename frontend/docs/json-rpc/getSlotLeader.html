@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>getSlotLeader — GARP JSON-RPC</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">GARP Blockchain</div>
+      <nav class="top-nav">
+        <a href="/">Home</a>
+        <a href="/docs/" class="active">Docs</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <ul class="nav">
+        <li><a href="../index.html#json-rpc">Back to JSON-RPC</a></li>
+      </ul>
+      <div id="methodToc" class="method-toc"></div>
+    </aside>
+    <section class="content">
+      <article id="get-slot-leader">
+        <h1>getSlotLeader</h1>
+        <p>Return the leader identity for the given slot, or current slot if omitted.</p>
+
+        <h2>Request</h2>
+        <div id="req-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "method": "getSlotLeader",
+  "params": { "slot": 12345 },
+  "id": 1
+}</code></pre>
+
+        <h2>Response</h2>
+        <div id="res-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "result": "garp:validator-xyz",
+  "id": 1
+}</code></pre>
+
+        <h2>Error</h2>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "error": { "code": -32602, "message": "Invalid params" },
+  "id": 1
+}</code></pre>
+
+        <h2>Notes</h2>
+        <ul>
+          <li>If <code>slot</code> is omitted, the node returns the current slot leader.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© GARP — Documentation</div>
+  </footer>
+
+  <script>
+    const slotLeaderRequestSchema = {
+      title: 'params', type: 'object', description: 'Optional slot parameter', properties: {
+        slot: { type: 'number', description: 'Specific slot (optional)' }
+      }
+    };
+    const slotLeaderResponseSchema = {
+      title: 'result', type: 'string', description: 'Leader identity for the slot'
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      renderSchema(slotLeaderRequestSchema, document.getElementById('req-schema'));
+      renderSchema(slotLeaderResponseSchema, document.getElementById('res-schema'));
+    });
+  </script>
+  <script src="../schema.js"></script>
+  <script src="../enhancements.js"></script>
+</body>
+</html>

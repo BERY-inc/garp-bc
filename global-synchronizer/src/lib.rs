@@ -20,6 +20,8 @@ pub mod settlement;
 pub mod network;
 pub mod storage;
 pub mod api;
+pub mod validator;
+pub mod consensus_example;
 
 use consensus::ConsensusEngine;
 use cross_domain::CrossDomainCoordinator;
@@ -304,6 +306,26 @@ impl GlobalSynchronizer {
     /// Get global metrics
     pub async fn get_metrics(&self) -> GarpResult<GlobalSyncMetrics> {
         Ok(self.metrics.as_ref().clone())
+    }
+
+    /// Validator management: list validators
+    pub async fn list_validators(&self) -> GarpResult<Vec<crate::validator::ValidatorInfo>> {
+        self.consensus_engine.list_validators().await
+    }
+
+    /// Validator management: add validator
+    pub async fn add_validator(&self, v: crate::validator::ValidatorInfo) -> GarpResult<()> {
+        self.consensus_engine.add_validator(v).await
+    }
+
+    /// Validator management: remove validator
+    pub async fn remove_validator(&self, id: ParticipantId) -> GarpResult<()> {
+        self.consensus_engine.remove_validator(id).await
+    }
+
+    /// Validator management: update validator status
+    pub async fn update_validator_status(&self, id: ParticipantId, status: crate::validator::ValidatorStatus) -> GarpResult<()> {
+        self.consensus_engine.update_validator_status(id, status).await
     }
 
     /// Convert cross-domain transaction into garp_common::Transaction for deterministic application

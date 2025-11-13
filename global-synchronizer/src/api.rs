@@ -5,9 +5,13 @@ use serde::Serialize;
 use serde_json::Value as JsonValue;
 use crate::{GlobalSynchronizer, storage::BlockInfo};
 use crate::cross_domain::CrossDomainTransaction;
+use crate::validator::{ValidatorInfo, ValidatorStatus};
 use garp_common::types::TransactionId;
 use uuid::Uuid;
 use hex;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use chrono::Utc;
 
 #[derive(Serialize)]
 struct ApiResponse<T> {
@@ -22,6 +26,7 @@ pub fn create_router(sync: Arc<GlobalSynchronizer>) -> Router {
         .route("/api/v1/status", get(status_handler(sync.clone())))
         .route("/api/v1/status/consensus", get(consensus_status_handler(sync.clone())))
         .route("/api/v1/status/metrics", get(metrics_handler(sync.clone())))
+        .route("/metrics", get(prometheus_metrics_handler(sync.clone())))
         .route("/api/v1/blocks/latest", get(latest_block_handler(sync.clone())))
         .route("/api/v1/blocks/:height", get(block_by_height_handler(sync.clone())))
         .route("/api/v1/blocks/:height/details", get(block_details_handler(sync)))
@@ -30,6 +35,10 @@ pub fn create_router(sync: Arc<GlobalSynchronizer>) -> Router {
         .route("/api/v1/transactions/:id/status", get(tx_status_handler(sync.clone())))
         .route("/api/v1/transactions/:id/details", get(tx_details_handler(sync.clone())))
         .route("/api/v1/transactions", post(submit_transaction_handler(sync)))
+        .route("/api/v1/transactions/signed", post(submit_signed_transaction_handler(sync.clone())))
+        .route("/api/v1/validators", get(validators_list_handler(sync.clone())).post(validators_add_handler(sync.clone())))
+        .route("/api/v1/validators/:id", axum::routing::delete(validators_remove_handler(sync.clone())))
+        .route("/api/v1/validators/:id/status", axum::routing::patch(validators_update_status_handler(sync.clone())))
         // Security: simple bearer token auth and concurrency limits
         .layer(middleware::from_fn(auth_middleware))
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
@@ -119,6 +128,43 @@ fn metrics_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler
                 }
                 Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some(format!("{}", e)) }),
             }
+        }
+    })
+}
+
+fn prometheus_metrics_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(), axum::body::Body> {
+    axum::routing::get(move || {
+        let sync = sync.clone();
+        async move {
+            let mut body = String::new();
+            if let Ok(m) = sync.get_metrics().await {
+                let total = *m.total_transactions.read().await;
+                let succ = *m.successful_transactions.read().await;
+                let fail = *m.failed_transactions.read().await;
+                let active = *m.active_domains.read().await;
+                let consensus_rounds = *m.consensus_rounds.read().await;
+                body.push_str(&format!("# HELP global_sync_total_transactions Total transactions submitted\n"));
+                body.push_str(&format!("# TYPE global_sync_total_transactions counter\n"));
+                body.push_str(&format!("global_sync_total_transactions {}\n", total));
+                body.push_str(&format!("# HELP global_sync_successful_transactions Successful transactions\n"));
+                body.push_str(&format!("# TYPE global_sync_successful_transactions counter\n"));
+                body.push_str(&format!("global_sync_successful_transactions {}\n", succ));
+                body.push_str(&format!("# HELP global_sync_failed_transactions Failed transactions\n"));
+                body.push_str(&format!("# TYPE global_sync_failed_transactions counter\n"));
+                body.push_str(&format!("global_sync_failed_transactions {}\n", fail));
+                body.push_str(&format!("# HELP global_sync_active_domains Active domains\n"));
+                body.push_str(&format!("# TYPE global_sync_active_domains gauge\n"));
+                body.push_str(&format!("global_sync_active_domains {}\n", active));
+                body.push_str(&format!("# HELP global_sync_consensus_rounds Consensus rounds\n"));
+                body.push_str(&format!("# TYPE global_sync_consensus_rounds counter\n"));
+                body.push_str(&format!("global_sync_consensus_rounds {}\n", consensus_rounds));
+            }
+            let headers = [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4")];
+            let mut resp = axum::response::Response::new(axum::body::Body::from(body));
+            for (k, v) in headers {
+                resp.headers_mut().insert(k, axum::http::HeaderValue::from_static(v));
+            }
+            resp
         }
     })
 }
@@ -216,7 +262,7 @@ fn block_transactions_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handl
                                     created_at: st.created_at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
                                     updated_at: st.updated_at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
                                     block_height: st.block_height,
-                                    block_hash: st.block_hash.map(|h| h.0),
+                                    block_hash: st.block_hash.as_ref().map(|h| hex::encode(h)),
                                     transaction_data_hex: hex::encode(st.transaction_data),
                                     transaction: serde_json::from_slice(&st.transaction_data).ok(),
                                 });
@@ -250,6 +296,134 @@ fn submit_transaction_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handl
             match sync.submit_transaction(tx.clone()).await {
                 Ok(id) => Json(ApiResponse { success: true, data: Some(serde_json::json!({"status":"Accepted","transaction_id": id.0.to_string()})), error: None }),
                 Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: Some(serde_json::json!({"status":"Rejected"})), error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct SignedTransactionDto {
+    tx: CrossDomainTransaction,
+    public_key_hex: String,
+    signature_hex: String,
+}
+
+fn submit_signed_transaction_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(AxumJson<SignedTransactionDto>,), axum::body::Body> {
+    axum::routing::post(move |AxumJson(signed): AxumJson<SignedTransactionDto>| {
+        let sync = sync.clone();
+        async move {
+            // Verify signature using ed25519 over canonical message
+            let message = canonical_tx_message(&signed.tx);
+            match verify_ed25519_signature(&signed.public_key_hex, &signed.signature_hex, &message) {
+                Ok(true) => {
+                    match sync.submit_transaction(signed.tx.clone()).await {
+                        Ok(id) => Json(ApiResponse { success: true, data: Some(serde_json::json!({"status":"Accepted","transaction_id": id.0.to_string()})), error: None }),
+                        Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: Some(serde_json::json!({"status":"Rejected"})), error: Some(format!("{}", e)) }),
+                    }
+                }
+                Ok(false) => Json(ApiResponse::<serde_json::Value> { success: false, data: Some(serde_json::json!({"status":"Rejected","reason":"invalid signature"})), error: None }),
+                Err(err) => Json(ApiResponse::<serde_json::Value> { success: false, data: Some(serde_json::json!({"status":"Rejected"})), error: Some(format!("{}", err)) }),
+            }
+        }
+    })
+}
+
+fn canonical_tx_message(tx: &CrossDomainTransaction) -> Vec<u8> {
+    let mut s = String::new();
+    s.push_str(&tx.transaction_id.0.to_string());
+    s.push('|');
+    s.push_str(&tx.source_domain.0);
+    s.push('|');
+    s.push_str(&tx.target_domains.iter().map(|d| d.0.clone()).collect::<Vec<_>>().join(","));
+    s.push('|');
+    s.push_str(&hex::encode(&tx.data));
+    s.push('|');
+    s.push_str(&tx.required_confirmations.to_string());
+    s.into_bytes()
+}
+
+fn verify_ed25519_signature(pk_hex: &str, sig_hex: &str, message: &[u8]) -> Result<bool, String> {
+    use ed25519_dalek::{Verifier, Signature, PublicKey};
+    let pk_bytes = hex::decode(pk_hex).map_err(|e| format!("invalid public key hex: {}", e))?;
+    let sig_bytes = hex::decode(sig_hex).map_err(|e| format!("invalid signature hex: {}", e))?;
+    let pk_arr: [u8; 32] = pk_bytes.try_into().map_err(|_| "invalid public key length")?;
+    let sig_arr: [u8; 64] = sig_bytes.try_into().map_err(|_| "invalid signature length")?;
+    let pk = PublicKey::from_bytes(&pk_arr).map_err(|e| format!("invalid public key: {}", e))?;
+    let sig = Signature::from_bytes(&sig_arr).map_err(|e| format!("invalid signature: {}", e))?;
+    pk.verify_strict(message, &sig).map(|_| true).map_err(|e| format!("signature verification failed: {}", e))
+}
+
+#[derive(serde::Deserialize)]
+struct ValidatorAddDto {
+    id: String,
+    public_key_hex: String,
+    voting_power: u64,
+    metadata: Option<std::collections::HashMap<String, String>>,
+}
+
+fn validators_list_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(), axum::body::Body> {
+    axum::routing::get(move || {
+        let sync = sync.clone();
+        async move {
+            match sync.list_validators().await {
+                Ok(list) => Json(ApiResponse { success: true, data: Some(list), error: None }),
+                Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+fn validators_add_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(AxumJson<ValidatorAddDto>,), axum::body::Body> {
+    axum::routing::post(move |AxumJson(dto): AxumJson<ValidatorAddDto>| {
+        let sync = sync.clone();
+        async move {
+            let id = garp_common::types::ParticipantId::new(&dto.id);
+            let mut v = ValidatorInfo {
+                id,
+                public_key_hex: dto.public_key_hex.clone(),
+                voting_power: dto.voting_power,
+                status: ValidatorStatus::Active,
+                joined_at: chrono::Utc::now(),
+                metadata: dto.metadata.unwrap_or_default(),
+            };
+            match sync.add_validator(v).await {
+                Ok(_) => Json(ApiResponse { success: true, data: Some(serde_json::json!({"added": dto.id})), error: None }),
+                Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+fn validators_remove_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(Path<String>,), axum::body::Body> {
+    axum::routing::delete(move |Path(id_str): Path<String>| {
+        let sync = sync.clone();
+        async move {
+            let id = garp_common::types::ParticipantId::new(&id_str);
+            match sync.remove_validator(id).await {
+                Ok(_) => Json(ApiResponse { success: true, data: Some(serde_json::json!({"removed": id_str})), error: None }),
+                Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+#[derive(serde::Deserialize)]
+struct UpdateValidatorStatusDto { status: String }
+
+fn validators_update_status_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(Path<String>, AxumJson<UpdateValidatorStatusDto>), axum::body::Body> {
+    axum::routing::patch(move |Path(id_str): Path<String>, AxumJson(dto): AxumJson<UpdateValidatorStatusDto>| {
+        let sync = sync.clone();
+        async move {
+            let id = garp_common::types::ParticipantId::new(&id_str);
+            let status = match dto.status.to_lowercase().as_str() {
+                "active" => ValidatorStatus::Active,
+                "inactive" => ValidatorStatus::Inactive,
+                "jailed" => ValidatorStatus::Jailed,
+                _ => return Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some("invalid status".into()) }),
+            };
+            match sync.update_validator_status(id, status).await {
+                Ok(_) => Json(ApiResponse { success: true, data: Some(serde_json::json!({"updated": id_str})), error: None }),
+                Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some(format!("{}", e)) }),
             }
         }
     })
@@ -307,7 +481,7 @@ fn tx_details_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Hand
                                 created_at: st.created_at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
                                 updated_at: st.updated_at.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
                                 block_height: st.block_height,
-                                block_hash: st.block_hash.map(|h| h.0),
+                                block_hash: st.block_hash.as_ref().map(|h| hex::encode(h)),
                                 transaction_data_hex: hex::encode(st.transaction_data),
                                 transaction: serde_json::from_slice(&st.transaction_data).ok(),
                             };
@@ -323,6 +497,44 @@ fn tx_details_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Hand
     })
 }
 async fn auth_middleware<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> Result<axum::response::Response, axum::http::StatusCode> {
+    // Per-IP throttle (simple in-memory)
+    static IP_THROTTLE: OnceLock<Mutex<HashMap<String, (u32, i64)>>> = OnceLock::new();
+    fn client_ip_from_req(req: &axum::http::Request<axum::body::Body>) -> String {
+        let headers = req.headers();
+        if let Some(ip) = headers.get("x-forwarded-for").and_then(|v| v.to_str().ok()) {
+            ip.split(',').next().unwrap_or("unknown").trim().to_string()
+        } else if let Some(ip) = headers.get("x-real-ip").and_then(|v| v.to_str().ok()) {
+            ip.trim().to_string()
+        } else {
+            "unknown".to_string()
+        }
+    }
+    fn check_ip_throttle(req: &axum::http::Request<axum::body::Body>) -> Result<(), axum::http::StatusCode> {
+        let rpm: u32 = std::env::var("SYNC_RATE_LIMIT_RPM").ok().and_then(|v| v.parse().ok()).unwrap_or(120);
+        let ip = client_ip_from_req(req);
+        let map = IP_THROTTLE.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = map.lock().unwrap();
+        let now_ms = Utc::now().timestamp_millis();
+        let window_ms: i64 = 60_000;
+        let entry = guard.entry(ip.clone()).or_insert((0u32, now_ms));
+        let (ref mut count, ref mut start_ms) = *entry;
+        if now_ms - *start_ms >= window_ms {
+            *start_ms = now_ms;
+            *count = 0;
+        }
+        *count += 1;
+        if *count > rpm {
+            tracing::warn!("Rate limit exceeded", ip = %ip, count = *count);
+            return Err(axum::http::StatusCode::TOO_MANY_REQUESTS);
+        }
+        Ok(())
+    }
+
+    // Apply per-IP throttle before auth
+    let empty_body_req = req.map(|_| axum::body::Body::empty());
+    if let Err(code) = check_ip_throttle(&empty_body_req) {
+        return Err(code);
+    }
     // Expect Authorization: Bearer <token>
     let required = std::env::var("SYNC_API_TOKEN").ok();
     if let Some(expected) = required {
@@ -336,6 +548,9 @@ async fn auth_middleware<B>(req: axum::http::Request<B>, next: middleware::Next<
                 }
             }
         }
+        let ip = client_ip_from_req(&empty_body_req);
+        let path = empty_body_req.uri().path().to_string();
+        tracing::warn!("Unauthorized request", ip = %ip, path = %path);
         return Err(axum::http::StatusCode::UNAUTHORIZED);
     }
     // If no token configured, allow

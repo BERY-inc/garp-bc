@@ -2,6 +2,10 @@
 const API_BASE_URL = '/api'; // This will be proxied to your backend
 const NODE_URL = '/node';     // This will be proxied to your participant node
 
+// Currency Metadata
+const CURRENCY_NAME = 'BERY';
+const CURRENCY_SYMBOL = 'BRY';
+
 // DOM Elements
 const checkHealthBtn = document.getElementById('checkHealth');
 const statusMessage = document.getElementById('statusMessage');
@@ -10,6 +14,10 @@ const transactionForm = document.getElementById('transactionForm');
 const transactionResult = document.getElementById('transactionResult');
 const getAccountBtn = document.getElementById('getAccount');
 const accountInfo = document.getElementById('accountInfo');
+const sendMessageBtn = document.getElementById('sendMessage');
+const loadConversationBtn = document.getElementById('loadConversation');
+const chatResult = document.getElementById('chatResult');
+const chatMessages = document.getElementById('chatMessages');
 
 // Check Blockchain Health
 async function checkBlockchainHealth() {
@@ -31,6 +39,61 @@ async function checkBlockchainHealth() {
     }
 }
 
+// Chat: Send Message
+async function sendChatMessage() {
+    const self = document.getElementById('chatSelf').value;
+    const peer = document.getElementById('chatPeer').value;
+    const ciphertext = document.getElementById('chatCiphertext').value;
+    const nonce = document.getElementById('chatNonce').value;
+    if (!self || !peer || !ciphertext || !nonce) {
+        chatResult.innerHTML = '<p>Please fill all chat fields</p>';
+        return;
+    }
+    try {
+        chatResult.innerHTML = '<p>Sending...</p>';
+        const res = await fetch(`${API_BASE_URL}/messages`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sender: self, recipient: peer, content_ciphertext: ciphertext, content_nonce: nonce })
+        });
+        const data = await res.json();
+        if (res.ok) {
+            chatResult.innerHTML = `<div class="status-ok">Message sent. ID: ${data.id}, hash: ${data.hash}</div>`;
+        } else {
+            chatResult.innerHTML = `<div class="status-error">Error: ${data.error || 'Unknown error'}</div>`;
+        }
+    } catch (e) {
+        chatResult.innerHTML = `<div class="status-error">Error: ${e.message}</div>`;
+    }
+}
+
+// Chat: Load Conversation
+async function loadChatMessages() {
+    const self = document.getElementById('chatSelf').value;
+    const peer = document.getElementById('chatPeer').value;
+    if (!self || !peer) {
+        chatMessages.innerHTML = '<p>Please enter your address and peer.</p>';
+        return;
+    }
+    try {
+        chatMessages.innerHTML = '<p>Loading messages...</p>';
+        const res = await fetch(`${API_BASE_URL}/messages?address=${encodeURIComponent(self)}&peer=${encodeURIComponent(peer)}&limit=50`);
+        const data = await res.json();
+        if (res.ok && Array.isArray(data)) {
+            chatMessages.innerHTML = data.map(m => `
+                <div class="message">
+                    <p><strong>${m.sender === self ? 'You' : 'Peer'}:</strong> [ciphertext ${m.content_ciphertext?.length || 0} bytes]</p>
+                    <p><small>${new Date(m.created_at).toLocaleString()} | hash ${m.hash.slice(0,8)}…</small></p>
+                </div>
+            `).join('');
+        } else {
+            chatMessages.innerHTML = `<div class="status-error">Error loading messages: ${data.error || 'Unknown error'}</div>`;
+        }
+    } catch (e) {
+        chatMessages.innerHTML = `<div class="status-error">Error: ${e.message}</div>`;
+    }
+}
+
 // Load Blockchain Information
 async function loadBlockchainInfo() {
     try {
@@ -43,6 +106,7 @@ async function loadBlockchainInfo() {
                 <p><strong>Block Number:</strong> ${block.number || 'N/A'}</p>
                 <p><strong>Timestamp:</strong> ${block.timestamp || 'N/A'}</p>
                 <p><strong>Transactions:</strong> ${block.transactions?.length || 0}</p>
+                <p><strong>Currency:</strong> ${CURRENCY_NAME} (${CURRENCY_SYMBOL})</p>
             `;
         } else {
             blockchainInfo.innerHTML = '<p>Unable to load blockchain information</p>';
@@ -123,7 +187,7 @@ async function getAccountInfo() {
             accountInfo.innerHTML = `
                 <h3>Account Information</h3>
                 <p><strong>Address:</strong> ${account.address || accountAddress}</p>
-                <p><strong>Balance:</strong> ${account.balance || 0} GARP</p>
+                <p><strong>Balance:</strong> ${account.balance || 0} ${CURRENCY_SYMBOL}</p>
                 <p><strong>Status:</strong> ${account.status || 'Active'}</p>
             `;
         } else {
@@ -171,6 +235,13 @@ if (transactionForm) {
 
 if (getAccountBtn) {
     getAccountBtn.addEventListener('click', getAccountInfo);
+}
+
+if (sendMessageBtn) {
+    sendMessageBtn.addEventListener('click', sendChatMessage);
+}
+if (loadConversationBtn) {
+    loadConversationBtn.addEventListener('click', loadChatMessages);
 }
 
 // Initialize on page load

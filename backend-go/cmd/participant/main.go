@@ -1,13 +1,13 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"flag"
-	"log"
-	"net/http"
-	"strconv"
-	"time"
+    "context"
+    "encoding/json"
+    "flag"
+    "log"
+    "net/http"
+    "strconv"
+    "time"
 
 	"garp-backend/internal/client"
 	"garp-backend/internal/config"
@@ -16,7 +16,8 @@ import (
 	"garp-backend/internal/state"
 	"garp-backend/internal/storage"
 
-	"github.com/gin-gonic/gin"
+    "github.com/gin-gonic/gin"
+    redis "github.com/redis/go-redis/v9"
 )
 
 func main() {
@@ -31,10 +32,19 @@ func main() {
 	// OpenTelemetry init
 	_ = botel.Init(cfg.OTEL.Endpoint, cfg.OTEL.ServiceName)
 
-	r := gin.Default()
-	r.Use(bkmid.MetricsMiddleware())
-	r.Use(bkmid.MaxBodyBytes(1 << 20))
-	r.Use(bkmid.RateLimit(240))
+    r := gin.Default()
+    r.Use(bkmid.MetricsMiddleware())
+    r.Use(bkmid.MaxBodyBytes(1 << 20))
+    // Initialize Redis client for distributed rate limiting
+    var rdb *redis.Client
+    if opt, err := redis.ParseURL(cfg.Database.RedisURL); err == nil {
+        rdb = redis.NewClient(opt)
+    } else {
+        log.Printf("rate limit: invalid Redis URL, falling back to local limiter: %v", err)
+    }
+    r.Use(bkmid.RateLimitRedis(240, rdb))
+	// Add baseline security headers
+	r.Use(bkmid.SecurityHeaders())
 	store := state.NewStore()
 	pc := client.New(cfg.Participant.BaseURL)
 	_ = pc.WithTLS(cfg.TLS.ClientCert, cfg.TLS.ClientKey, cfg.TLS.CACert)
@@ -148,7 +158,7 @@ func main() {
 		c.JSON(http.StatusOK, out)
 	})
 
-	// Blocks (proxy to participant)
+    // Blocks (proxy to participant)
 	r.GET("/blocks/latest", func(c *gin.Context) {
 		var out any
 		if err := sc.LatestBlock(&out); err != nil {
@@ -179,20 +189,198 @@ func main() {
 		c.JSON(http.StatusOK, out)
 	})
 
-	// Accounts (still local until participant provides accounts API)
+    // Accounts (still local until participant provides accounts API)
 	r.POST("/accounts", func(c *gin.Context) {
 		addr := "0xacc" + strconv.FormatInt(time.Now().UnixNano(), 36)
 		acc := state.Account{Address: addr, Balance: 0, Nonce: 0}
 		store.CreateAccount(acc)
 		c.JSON(http.StatusOK, gin.H{"address": addr, "public_key": "pubkey"})
 	})
-	r.GET("/accounts/:addr", func(c *gin.Context) {
-		if acc, ok := store.GetAccount(c.Param("addr")); ok {
-			c.JSON(http.StatusOK, acc)
-			return
-		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
-	})
+    r.GET("/accounts/:addr", func(c *gin.Context) {
+        if acc, ok := store.GetAccount(c.Param("addr")); ok {
+            c.JSON(http.StatusOK, acc)
+            return
+        }
+        c.JSON(http.StatusNotFound, gin.H{"error": "Account not found"})
+    })
+
+    // Chat: create message
+    r.POST("/messages", func(c *gin.Context) {
+        if st == nil {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"error": "storage unavailable"})
+            return
+        }
+        var in struct {
+            Sender    string `json:"sender"`
+            Recipient string `json:"recipient"`
+            Ciphertext string `json:"content_ciphertext"`
+            Nonce      string `json:"content_nonce"`
+        }
+        if err := c.ShouldBindJSON(&in); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+            return
+        }
+        ct := []byte(in.Ciphertext)
+        nn := []byte(in.Nonce)
+        m, err := st.CreateMessage(c.Request.Context(), in.Sender, in.Recipient, ct, nn)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{"id": m.ID, "hash": m.Hash, "created_at": m.CreatedAt})
+    })
+
+    // Chat: list messages between two peers
+    r.GET("/messages", func(c *gin.Context) {
+        if st == nil {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"error": "storage unavailable"})
+            return
+        }
+        a := c.Query("address")
+        b := c.Query("peer")
+        if a == "" || b == "" {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "address and peer are required"})
+            return
+        }
+        var sincePtr *time.Time
+        if s := c.Query("since"); s != "" {
+            if t, err := time.Parse(time.RFC3339, s); err == nil { sincePtr = &t }
+        }
+        limit := 100
+        if l := c.Query("limit"); l != "" {
+            if v, err := strconv.Atoi(l); err == nil && v > 0 { limit = v }
+        }
+        msgs, err := st.ListMessages(c.Request.Context(), a, b, sincePtr, limit)
+        if err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, msgs)
+    })
+
+    // Chat: anchor a message hash to a block (placeholder)
+    r.POST("/messages/:id/anchor", func(c *gin.Context) {
+        if st == nil {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"error": "storage unavailable"})
+            return
+        }
+        id64, err := strconv.ParseInt(c.Param("id"), 10, 64)
+        if err != nil { c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"}); return }
+        var in struct{ Block int64 `json:"block"` }
+        if err := c.ShouldBindJSON(&in); err != nil { c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"}); return }
+        if err := st.AnchorMessage(c.Request.Context(), id64, in.Block); err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{"id": id64, "anchored_at_block": in.Block})
+    })
+
+    // Chat: SSE stream of new message events via Redis Pub/Sub
+    r.GET("/stream/messages", func(c *gin.Context) {
+        if st == nil || st.Redis == nil {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"error": "stream unavailable"})
+            return
+        }
+        c.Header("Content-Type", "text/event-stream")
+        c.Header("Cache-Control", "no-cache")
+        c.Header("Connection", "keep-alive")
+        ctx := c.Request.Context()
+        sub := st.Redis.Subscribe(ctx, "messages")
+        defer sub.Close()
+        ch := sub.Channel()
+        // initial heartbeat
+        c.Writer.Write([]byte("event: heartbeat\n"))
+        c.Writer.Write([]byte("data: ok\n\n"))
+        c.Writer.Flush()
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case msg, ok := <-ch:
+                if !ok { return }
+                c.Writer.Write([]byte("event: message\n"))
+                c.Writer.Write([]byte("data: "))
+                c.Writer.Write([]byte(msg.Payload))
+                c.Writer.Write([]byte("\n\n"))
+                c.Writer.Flush()
+            }
+        }
+    })
+
+    // --- P2P signaling: publish/subscribe ephemeral signals for WebRTC/D2D setup ---
+    // Send signal: { from, to, type, payload }
+    r.POST("/signals", func(c *gin.Context) {
+        if st == nil || st.Redis == nil {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"error": "signals unavailable"})
+            return
+        }
+        var in struct {
+            From   string         `json:"from"`
+            To     string         `json:"to"`
+            Type   string         `json:"type"`
+            Payload map[string]any `json:"payload"`
+        }
+        if err := c.ShouldBindJSON(&in); err != nil || in.From == "" || in.To == "" || in.Type == "" {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+            return
+        }
+        env := map[string]any{
+            "from": in.From,
+            "to": in.To,
+            "type": in.Type,
+            "payload": in.Payload,
+            "timestamp": time.Now().UTC().Format(time.RFC3339),
+        }
+        b, _ := json.Marshal(env)
+        ch := "signals:" + in.To
+        if err := st.Redis.Publish(c.Request.Context(), ch, b).Err(); err != nil {
+            c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{"success": true})
+    })
+
+    // Stream signals for a given address via SSE
+    r.GET("/stream/signals", func(c *gin.Context) {
+        if st == nil || st.Redis == nil {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"error": "signals unavailable"})
+            return
+        }
+        addr := c.Query("address")
+        if addr == "" {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "address required"})
+            return
+        }
+        c.Header("Content-Type", "text/event-stream")
+        c.Header("Cache-Control", "no-cache")
+        c.Header("Connection", "keep-alive")
+        ctx := c.Request.Context()
+        sub := st.Redis.Subscribe(ctx, "signals:"+addr)
+        defer sub.Close()
+        ch := sub.Channel()
+        c.Writer.Write([]byte("event: heartbeat\n"))
+        c.Writer.Write([]byte("data: ok\n\n"))
+        c.Writer.Flush()
+        for {
+            select {
+            case <-ctx.Done():
+                return
+            case msg, ok := <-ch:
+                if !ok { return }
+                c.Writer.Write([]byte("event: signal\n"))
+                c.Writer.Write([]byte("data: "))
+                c.Writer.Write([]byte(msg.Payload))
+                c.Writer.Write([]byte("\n\n"))
+                c.Writer.Flush()
+            }
+        }
+    })
+    // Keys (placeholder public key retrieval)
+    r.GET("/keys/:addr", func(c *gin.Context) {
+        addr := c.Param("addr")
+        // Placeholder: return a static public key until integrated with wallet
+        c.JSON(http.StatusOK, gin.H{"address": addr, "public_key": "pubkey"})
+    })
 
 	// Contracts
 	r.GET("/contracts", func(c *gin.Context) {
@@ -232,12 +420,12 @@ func main() {
 		}
 		c.JSON(http.StatusOK, out)
 	})
-	r.POST("/contracts", func(c *gin.Context) {
-		var in map[string]any
-		if err := c.ShouldBindJSON(&in); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-			return
-		}
+    r.POST("/contracts", func(c *gin.Context) {
+        var in map[string]any
+        if err := c.ShouldBindJSON(&in); err != nil {
+            c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+            return
+        }
 		var out map[string]any
 		if err := pc.CreateContract(in, &out); err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})

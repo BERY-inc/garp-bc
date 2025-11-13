@@ -7,11 +7,22 @@ use tokio::time::{interval, timeout};
 use uuid::Uuid;
 use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
+use sqlx::{Pool, Postgres, Row};
 
 use garp_common::{GarpResult, GarpError};
-use garp_common::types::{ParticipantId, DomainId, NodeId, TransactionId, BlockHash};
+use garp_common::types::{ParticipantId, TransactionId, Block, Transaction};
+// Re-export canonical block header from garp_common
+pub use garp_common::types::BlockHeader;
+// Canonical type aliases to align with garp_common
+pub type GlobalBlock = Block;
+pub type GlobalTransaction = Transaction;
+// Local aliases for IDs and hashes used in this module
+pub type NodeId = String;
+pub type DomainId = String;
+pub type BlockHash = Vec<u8>;
 
 use crate::config::GlobalSyncConfig;
+use crate::consensus::FinalityCertificate;
 
 /// Global storage manager for distributed data persistence
 pub struct GlobalStorage {
@@ -723,6 +734,12 @@ pub struct ConsensusStorage {
     
     /// View changes
     view_changes: Arc<RwLock<HashMap<u64, ViewChangeRecord>>>,
+    
+    /// Finality certificates indexed by block hash (string)
+    finality_by_hash: Arc<RwLock<HashMap<String, FinalityCertificate>>>,
+    
+    /// Finality certificates indexed by block height
+    finality_by_height: Arc<RwLock<BTreeMap<u64, FinalityCertificate>>>,
     
     /// Storage backend
     backend: Arc<dyn StorageBackend>,
@@ -2180,12 +2197,18 @@ pub struct StorageMetrics {
 impl GlobalStorage {
     /// Create new global storage
     pub async fn new(config: Arc<GlobalSyncConfig>) -> GarpResult<Self> {
-        let node_id = NodeId::new(config.node.node_id.clone());
+        let node_id = config.node.node_id.clone();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let event_rx = Arc::new(Mutex::new(event_rx));
         
-        // Create storage backends (TODO: implement actual backends)
-        let backend = Arc::new(MemoryStorageBackend::new());
+        // Select storage backend based on configuration
+        let backend: Arc<dyn StorageBackend> = if config.database.url.starts_with("postgres://") || config.database.url.starts_with("postgresql://") {
+            info!("Using PostgresStorageBackend for persistence");
+            Arc::new(PostgresStorageBackend::new(config.clone()).await?)
+        } else {
+            warn!("Unknown database URL '{}', falling back to in-memory storage", config.database.url);
+            Arc::new(MemoryStorageBackend::new())
+        };
         
         let transaction_storage = Arc::new(TransactionStorage::new(config.clone(), backend.clone()).await?);
         let block_storage = Arc::new(BlockStorage::new(config.clone(), backend.clone()).await?);
@@ -2301,7 +2324,7 @@ impl GlobalStorage {
 
     /// Get transactions by block height
     pub async fn get_transactions_by_height(&self, height: u64) -> GarpResult<Vec<TransactionId>> {
-        Ok(self.transaction_storage.get_transactions_by_height(height).await)
+        self.transaction_storage.get_transactions_by_height(height).await
     }
     
     /// Update state
@@ -2405,6 +2428,21 @@ impl GlobalStorage {
         
         Ok(handle)
     }
+
+    /// Store a finality certificate via consensus storage
+    pub async fn store_finality_certificate(&self, cert: FinalityCertificate) -> GarpResult<()> {
+        self.consensus_storage.store_finality_certificate(cert).await
+    }
+
+    /// Get a finality certificate by block hash string
+    pub async fn get_finality_certificate_by_hash(&self, hash: &str) -> GarpResult<Option<FinalityCertificate>> {
+        self.consensus_storage.get_finality_certificate_by_hash(hash).await
+    }
+
+    /// Get a finality certificate by block height
+    pub async fn get_finality_certificate_by_height(&self, height: u64) -> GarpResult<Option<FinalityCertificate>> {
+        self.consensus_storage.get_finality_certificate_by_height(height).await
+    }
 }
 
 // Implementation stubs for storage components
@@ -2451,6 +2489,61 @@ impl TransactionStorage {
     pub async fn get_transaction(&self, transaction_id: &TransactionId) -> GarpResult<Option<StoredTransaction>> {
         let active = self.active_transactions.read().await;
         Ok(active.get(transaction_id).cloned())
+    }
+
+    /// Assign a set of transactions to a finalized block height and hash
+    pub async fn assign_block(
+        &self,
+        height: u64,
+        block_hash: BlockHash,
+        tx_ids: &[TransactionId],
+    ) -> GarpResult<()> {
+        // Update height -> tx_ids index
+        {
+            let mut history = self.transaction_history.write().await;
+            let entry = history.entry(height).or_insert_with(Vec::new);
+            for tid in tx_ids {
+                if !entry.contains(tid) {
+                    entry.push(tid.clone());
+                }
+            }
+        }
+
+        // Tag active transactions with block metadata and mark as settled
+        {
+            let mut active = self.active_transactions.write().await;
+            for tid in tx_ids {
+                if let Some(tx) = active.get_mut(tid) {
+                    tx.block_height = Some(height);
+                    tx.block_hash = Some(block_hash.clone());
+                    tx.updated_at = SystemTime::now();
+                    // Mark transaction as settled upon finalization
+                    tx.status = TransactionStatus::Settled;
+                }
+            }
+        }
+
+        // Maintain generic index keys for convenience (height and block hash)
+        {
+            let mut index = self.transaction_index.write().await;
+            let height_key = format!("height:{}", height);
+            let block_key = format!("block:{}", hex::encode(&block_hash));
+
+            let height_set = index.entry(height_key).or_insert_with(HashSet::new);
+            let block_set = index.entry(block_key).or_insert_with(HashSet::new);
+            for tid in tx_ids {
+                height_set.insert(tid.clone());
+                block_set.insert(tid.clone());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Get transaction IDs assigned to a given block height
+    pub async fn get_transactions_by_height(&self, height: u64) -> GarpResult<Vec<TransactionId>> {
+        let history = self.transaction_history.read().await;
+        Ok(history.get(&height).cloned().unwrap_or_default())
     }
 }
 
@@ -2561,9 +2654,32 @@ impl ConsensusStorage {
             consensus_history: Arc::new(RwLock::new(VecDeque::new())),
             vote_records: Arc::new(RwLock::new(HashMap::new())),
             view_changes: Arc::new(RwLock::new(HashMap::new())),
+            finality_by_hash: Arc::new(RwLock::new(HashMap::new())),
+            finality_by_height: Arc::new(RwLock::new(BTreeMap::new())),
             backend,
             metrics,
         })
+    }
+
+    /// Store a finality certificate and index it by hash and height
+    pub async fn store_finality_certificate(&self, cert: FinalityCertificate) -> GarpResult<()> {
+        let mut by_hash = self.finality_by_hash.write().await;
+        let mut by_height = self.finality_by_height.write().await;
+        by_hash.insert(cert.block_hash.clone(), cert.clone());
+        by_height.insert(cert.height, cert);
+        Ok(())
+    }
+
+    /// Retrieve a finality certificate by block hash string
+    pub async fn get_finality_certificate_by_hash(&self, hash: &str) -> GarpResult<Option<FinalityCertificate>> {
+        let by_hash = self.finality_by_hash.read().await;
+        Ok(by_hash.get(hash).cloned())
+    }
+
+    /// Retrieve a finality certificate by block height
+    pub async fn get_finality_certificate_by_height(&self, height: u64) -> GarpResult<Option<FinalityCertificate>> {
+        let by_height = self.finality_by_height.read().await;
+        Ok(by_height.get(&height).cloned())
     }
 }
 
@@ -2804,6 +2920,216 @@ impl StorageBackend for MemoryStorageBackend {
     }
 }
 
+// ---------------------------
+// Postgres storage backend
+// ---------------------------
+
+pub struct PostgresStorageBackend {
+    pool: Pool<Postgres>,
+}
+
+impl PostgresStorageBackend {
+    pub async fn new(config: Arc<GlobalSyncConfig>) -> GarpResult<Self> {
+        // Build connection pool
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(config.database.max_connections)
+            .min_connections(config.database.min_connections)
+            .connect_timeout(std::time::Duration::from_millis(config.database.connect_timeout_ms))
+            .idle_timeout(std::time::Duration::from_millis(config.database.idle_timeout_ms))
+            .connect(&config.database.url)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres connect error: {}", e)))?;
+
+        let backend = Self { pool };
+        if config.database.enable_migrations {
+            backend.run_migrations().await?;
+        }
+        Ok(backend)
+    }
+
+    async fn run_migrations(&self) -> GarpResult<()> {
+        // Create a simple key-value store and snapshot tables if they do not exist
+        let queries = [
+            r#"CREATE TABLE IF NOT EXISTS kv_store (
+                    key TEXT PRIMARY KEY,
+                    value BYTEA NOT NULL,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )"#,
+            r#"CREATE TABLE IF NOT EXISTS kv_snapshots (
+                    snapshot_id TEXT PRIMARY KEY,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )"#,
+            r#"CREATE TABLE IF NOT EXISTS kv_snapshot_entries (
+                    snapshot_id TEXT NOT NULL,
+                    key TEXT NOT NULL,
+                    value BYTEA NOT NULL,
+                    PRIMARY KEY (snapshot_id, key),
+                    FOREIGN KEY (snapshot_id) REFERENCES kv_snapshots(snapshot_id) ON DELETE CASCADE
+                )"#,
+        ];
+
+        for q in queries {
+            sqlx::query(q)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| garp_common::GarpError::StorageError(format!("Migration error: {}", e)))?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl StorageBackend for PostgresStorageBackend {
+    async fn get(&self, key: &str) -> GarpResult<Option<Vec<u8>>> {
+        let res = sqlx::query("SELECT value FROM kv_store WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres get error: {}", e)))?;
+        Ok(res.map(|row| row.get::<Vec<u8>, _>("value")))
+    }
+
+    async fn set(&self, key: &str, value: Vec<u8>) -> GarpResult<()> {
+        sqlx::query(r#"
+            INSERT INTO kv_store(key, value, created_at, updated_at)
+            VALUES ($1, $2, NOW(), NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        "#)
+            .bind(key)
+            .bind(value)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres set error: {}", e)))?;
+        Ok(())
+    }
+
+    async fn delete(&self, key: &str) -> GarpResult<()> {
+        sqlx::query("DELETE FROM kv_store WHERE key = $1")
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres delete error: {}", e)))?;
+        Ok(())
+    }
+
+    async fn exists(&self, key: &str) -> GarpResult<bool> {
+        let res = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM kv_store WHERE key = $1")
+            .bind(key)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres exists error: {}", e)))?;
+        Ok(res > 0)
+    }
+
+    async fn list_keys(&self, prefix: &str) -> GarpResult<Vec<String>> {
+        let like = format!("{}%", prefix);
+        let rows = sqlx::query("SELECT key FROM kv_store WHERE key LIKE $1")
+            .bind(&like)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres list_keys error: {}", e)))?;
+        Ok(rows.into_iter().map(|r| r.get::<String, _>("key")).collect())
+    }
+
+    async fn batch(&self, operations: Vec<BatchOperation>) -> GarpResult<()> {
+        let mut tx = self.pool.begin().await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres begin tx error: {}", e)))?;
+        for op in operations {
+            match op {
+                BatchOperation::Set { key, value } => {
+                    sqlx::query(r#"
+                        INSERT INTO kv_store(key, value, created_at, updated_at)
+                        VALUES ($1, $2, NOW(), NOW())
+                        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+                    "#)
+                        .bind(&key)
+                        .bind(&value)
+                        .execute(&mut tx)
+                        .await
+                        .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres batch set error: {}", e)))?;
+                }
+                BatchOperation::Delete { key } => {
+                    sqlx::query("DELETE FROM kv_store WHERE key = $1")
+                        .bind(&key)
+                        .execute(&mut tx)
+                        .await
+                        .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres batch delete error: {}", e)))?;
+                }
+            }
+        }
+        tx.commit().await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres commit tx error: {}", e)))?;
+        Ok(())
+    }
+
+    async fn create_snapshot(&self, snapshot_id: &str) -> GarpResult<()> {
+        let mut tx = self.pool.begin().await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres begin snapshot tx error: {}", e)))?;
+        sqlx::query("INSERT INTO kv_snapshots(snapshot_id, created_at) VALUES ($1, NOW()) ON CONFLICT DO NOTHING")
+            .bind(snapshot_id)
+            .execute(&mut tx)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres snapshot header error: {}", e)))?;
+        sqlx::query(r#"
+            INSERT INTO kv_snapshot_entries(snapshot_id, key, value)
+            SELECT $1, key, value FROM kv_store
+            ON CONFLICT (snapshot_id, key) DO UPDATE SET value = EXCLUDED.value
+        "#)
+            .bind(snapshot_id)
+            .execute(&mut tx)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres snapshot entries error: {}", e)))?;
+        tx.commit().await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres commit snapshot tx error: {}", e)))?;
+        Ok(())
+    }
+
+    async fn restore_snapshot(&self, snapshot_id: &str) -> GarpResult<()> {
+        let mut tx = self.pool.begin().await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres begin restore tx error: {}", e)))?;
+        sqlx::query("DELETE FROM kv_store")
+            .execute(&mut tx)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres clear kv_store error: {}", e)))?;
+        sqlx::query(r#"
+            INSERT INTO kv_store(key, value, created_at, updated_at)
+            SELECT key, value, NOW(), NOW()
+            FROM kv_snapshot_entries
+            WHERE snapshot_id = $1
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+        "#)
+            .bind(snapshot_id)
+            .execute(&mut tx)
+            .await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres restore entries error: {}", e)))?;
+        tx.commit().await
+            .map_err(|e| garp_common::GarpError::StorageError(format!("Postgres commit restore tx error: {}", e)))?;
+        Ok(())
+    }
+
+    async fn get_stats(&self) -> GarpResult<StorageStats> {
+        let total_keys = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM kv_store")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+        // Size info is not trivial; approximate by sum of octet_length(value)
+        let total_size = sqlx::query_scalar::<_, Option<i64>>("SELECT SUM(octet_length(value)) FROM kv_store")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(None)
+            .unwrap_or(0);
+        Ok(StorageStats {
+            total_keys: total_keys as u64,
+            total_size: total_size as u64,
+            free_space: 0,
+            read_ops: 0,
+            write_ops: 0,
+            delete_ops: 0,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2826,8 +3152,8 @@ mod tests {
             transaction_id: TransactionId(uuid::Uuid::new_v4()),
             transaction_data: vec![1, 2, 3],
             transaction_type: "test".to_string(),
-            source_domain: DomainId::new("domain1".to_string()),
-            target_domains: vec![DomainId::new("domain2".to_string())],
+            source_domain: "domain1".to_string(),
+            target_domains: vec!["domain2".to_string()],
             status: TransactionStatus::Pending,
             consensus_state: ConsensusState {
                 phase: "prepare".to_string(),

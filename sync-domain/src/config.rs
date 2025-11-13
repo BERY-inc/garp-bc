@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use garp_common::GarpResult;
+use garp_common::{GarpResult, GenesisConfig, ChainParams};
 use anyhow::Context;
 
 /// Synchronization Domain configuration
@@ -35,6 +35,14 @@ pub struct SyncDomainConfig {
     
     /// Monitoring configuration
     pub monitoring: MonitoringConfig,
+    
+    /// Genesis configuration
+    #[serde(default)]
+    pub genesis: Option<GenesisConfig>,
+
+    /// Chain parameters
+    #[serde(default)]
+    pub chain: Option<ChainParams>,
 }
 
 /// Domain metadata

@@ -5,6 +5,7 @@ use garp_common::{
 };
 use crate::storage::StorageBackend;
 use crate::wasm_runtime::{WasmRuntime, WasmExecutionResult, WasmHostFunctions};
+use crate::contract_state::ContractStateManager; // Add this import
 use std::sync::Arc;
 use std::collections::HashMap;
 use serde_json::{Value, Map};
@@ -18,6 +19,7 @@ pub struct ContractEngine {
     crypto_service: Arc<CryptoService>,
     template_registry: Arc<TemplateRegistry>,
     wasm_runtime: Arc<WasmRuntime>,
+    contract_state_manager: Arc<ContractStateManager>, // Add contract state manager
 }
 
 /// Contract template registry
@@ -37,6 +39,7 @@ pub struct ContractTemplate {
     pub validation_rules: Vec<ValidationRule>,
     pub privacy_settings: PrivacySettings,
     pub wasm_bytecode: Option<Vec<u8>>, // Optional WASM bytecode for smart contracts
+    pub upgrade_policy: UpgradePolicy, // Contract upgrade policy
 }
 
 /// Template parameter definition
@@ -135,6 +138,19 @@ pub struct PrivacySettings {
     pub audit_trail: bool,
 }
 
+/// Contract upgrade policy
+#[derive(Debug, Clone)]
+pub enum UpgradePolicy {
+    /// Contract cannot be upgraded
+    None,
+    /// Contract can be upgraded by any signatory
+    Signatory,
+    /// Contract can be upgraded by a specific participant
+    Participant(ParticipantId),
+    /// Contract can be upgraded through a governance process
+    Governance,
+}
+
 /// Contract execution context
 #[derive(Debug, Clone)]
 pub struct ExecutionContext {
@@ -155,6 +171,7 @@ pub struct ExecutionResult {
     pub new_contracts: Vec<Contract>,
     pub archived_contracts: Vec<ContractId>,
     pub events: Vec<ContractEvent>,
+    pub upgraded_contracts: Vec<ContractId>, // Contracts that were upgraded
 }
 
 /// Executed effect
@@ -183,7 +200,15 @@ impl ContractEngine {
         crypto_service: Arc<CryptoService>,
     ) -> Self {
         let template_registry = Arc::new(TemplateRegistry::new());
-        let wasm_runtime = Arc::new(WasmRuntime::new());
+        let wasm_runtime = Arc::new(WasmRuntime::new(
+            storage.clone(),
+            crypto_service.clone(),
+            1_000_000, // Default gas limit
+            1024 * 1024 // Default memory limit (1MB)
+        ));
+        
+        // Create contract state manager
+        let contract_state_manager = Arc::new(ContractStateManager::new(storage.clone()));
         
         // Register built-in templates
         let mut engine = Self {
@@ -191,6 +216,7 @@ impl ContractEngine {
             crypto_service,
             template_registry,
             wasm_runtime,
+            contract_state_manager, // Add contract state manager
         };
         
         engine.register_builtin_templates();
@@ -323,6 +349,125 @@ impl ContractEngine {
     /// Register a new contract template
     pub fn register_template(&self, template: ContractTemplate) -> GarpResult<()> {
         self.template_registry.register_template(template)
+    }
+
+    /// Deploy a new contract from WASM bytecode
+    pub async fn deploy_contract(
+        &self,
+        wasm_bytecode: Vec<u8>,
+        signatories: Vec<ParticipantId>,
+        observers: Vec<ParticipantId>,
+        arguments: Value,
+        deployer: &ParticipantId,
+    ) -> GarpResult<Contract> {
+        info!("Deploying contract from WASM bytecode by {}", deployer.0);
+
+        // Validate WASM bytecode
+        self.wasm_runtime.validate_bytecode(&wasm_bytecode)?;
+
+        // Create a new template for this contract
+        let template_id = format!("contract_{}", uuid::Uuid::new_v4());
+        let template = ContractTemplate {
+            id: template_id.clone(),
+            name: "Deployed Contract".to_string(),
+            version: "1.0.0".to_string(),
+            description: "Deployed smart contract".to_string(),
+            parameters: vec![],
+            choices: vec![],
+            validation_rules: vec![],
+            privacy_settings: PrivacySettings {
+                encrypt_arguments: false,
+                encrypt_choice_data: false,
+                visible_to_observers: vec![],
+                audit_trail: true,
+            },
+            wasm_bytecode: Some(wasm_bytecode.clone()),
+            upgrade_policy: UpgradePolicy::Signatory, // Allow signatories to upgrade
+        };
+
+        // Register the template
+        self.register_template(template)?;
+
+        // Create contract
+        let contract = Contract {
+            id: garp_common::ContractId(uuid::Uuid::new_v4()),
+            template_id: template_id.clone(),
+            signatories,
+            observers,
+            argument: arguments,
+            created_at: chrono::Utc::now(),
+            archived: false,
+        };
+
+        // Store contract
+        self.storage.store_contract(&contract).await?;
+
+        // Load WASM contract into runtime
+        self.wasm_runtime.load_contract(&contract.id.0.to_string(), wasm_bytecode).await?;
+
+        info!("Contract {} deployed successfully with template {}", contract.id.0, template_id);
+        Ok(contract)
+    }
+
+    /// Upgrade an existing contract with new WASM bytecode
+    pub async fn upgrade_contract(
+        &self,
+        contract_id: &garp_common::ContractId,
+        new_wasm_bytecode: Vec<u8>,
+        upgrader: &ParticipantId,
+    ) -> GarpResult<()> {
+        info!("Upgrading contract {} by {}", contract_id.0, upgrader.0);
+
+        // Get contract
+        let contract = self.storage.get_contract(contract_id).await?
+            .ok_or_else(|| ContractError::ContractNotFound(contract_id.clone()))?;
+
+        // Get template
+        let template = self.template_registry.get_template(&contract.template_id)?;
+
+        // Check upgrade policy
+        match &template.upgrade_policy {
+            UpgradePolicy::None => {
+                return Err(ContractError::Unauthorized("Contract cannot be upgraded".to_string()).into());
+            }
+            UpgradePolicy::Signatory => {
+                if !contract.signatories.contains(upgrader) {
+                    return Err(ContractError::Unauthorized("Only signatories can upgrade this contract".to_string()).into());
+                }
+            }
+            UpgradePolicy::Participant(required_participant) => {
+                if upgrader != required_participant {
+                    return Err(ContractError::Unauthorized(
+                        format!("Only participant {} can upgrade this contract", required_participant.0)
+                    ).into());
+                }
+            }
+            UpgradePolicy::Governance => {
+                // Governance upgrade would require a separate process
+                return Err(ContractError::Unauthorized("Governance upgrade not implemented".to_string()).into());
+            }
+        }
+
+        // Validate new WASM bytecode
+        self.wasm_runtime.validate_bytecode(&new_wasm_bytecode)?;
+
+        // Create updated template
+        let mut updated_template = template.clone();
+        updated_template.wasm_bytecode = Some(new_wasm_bytecode.clone());
+        updated_template.version = format!("{}.{}.{}", 
+            updated_template.version.split('.').nth(0).unwrap_or("0"),
+            updated_template.version.split('.').nth(1).unwrap_or("0"),
+            updated_template.version.split('.').nth(2).unwrap_or("0").parse::<u32>().unwrap_or(0) + 1
+        );
+
+        // Update template in registry
+        self.template_registry.register_template(updated_template)?;
+
+        // Reload WASM contract in runtime
+        self.wasm_runtime.load_contract(&contract.id.0.to_string(), new_wasm_bytecode).await?;
+
+        info!("Contract {} upgraded successfully", contract_id.0);
+        Ok(())
     }
 
     /// Validate authorization for contract execution
@@ -546,6 +691,7 @@ impl ContractEngine {
             new_contracts: Vec::new(),
             archived_contracts: Vec::new(),
             events: Vec::new(),
+            upgraded_contracts: Vec::new(),
         };
 
         for effect in &choice.effects {
@@ -611,13 +757,64 @@ impl ContractEngine {
                 })
             }
             ContractEffect::EmitEvent { event_type, data } => {
-                // Emit a contract event
+                // Emit a contract event and store it
+                let event = ContractEvent {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    contract_id: context.contract.id.clone(),
+                    event_type: event_type.clone(),
+                    data: data.clone(),
+                    timestamp: chrono::Utc::now(),
+                    emitter: context.executor.clone(),
+                };
+                
+                // Store the event
+                self.storage.store_contract_event(&event).await?;
+                
                 Ok(ExecutedEffect {
                     effect_type: "EmitEvent".to_string(),
                     description: format!("Emitted event {}", event_type),
                     data: serde_json::json!({
                         "event_type": event_type,
                         "data": data
+                    }),
+                })
+            }
+            ContractEffect::ExecuteWasm { contract_id, function_name, arguments } => {
+                // Execute WASM function
+                let wasm_context = crate::wasm_runtime::WasmExecutionContext {
+                    contract_id: contract_id.clone(),
+                    function_name: function_name.clone(),
+                    arguments: vec![], // In a real implementation, you would convert the arguments
+                    caller: context.executor.0.clone(),
+                    gas_limit: 1_000_000,
+                    timestamp: chrono::Utc::now(),
+                };
+                
+                let execution_result = self.wasm_runtime.execute_function(wasm_context).await?;
+                
+                // Store any events emitted by the WASM contract
+                for wasm_event in execution_result.events {
+                    let contract_event = ContractEvent {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        contract_id: ContractId(uuid::Uuid::parse_str(contract_id).unwrap_or_default()),
+                        event_type: wasm_event.name,
+                        data: wasm_event.data,
+                        timestamp: wasm_event.timestamp,
+                        emitter: context.executor.clone(),
+                    };
+                    
+                    self.storage.store_contract_event(&contract_event).await?;
+                }
+                
+                Ok(ExecutedEffect {
+                    effect_type: "ExecuteWasm".to_string(),
+                    description: format!("Executed WASM function {} on contract {}", function_name, contract_id),
+                    data: serde_json::json!({
+                        "contract_id": contract_id,
+                        "function_name": function_name,
+                        "arguments": arguments,
+                        "success": execution_result.success,
+                        "gas_used": execution_result.gas_used,
                     }),
                 })
             }
@@ -725,6 +922,8 @@ impl ContractEngine {
                 visible_to_observers: vec!["status".to_string()],
                 audit_trail: true,
             },
+            wasm_bytecode: None,
+            upgrade_policy: UpgradePolicy::None,
         };
 
         let _ = self.register_template(purchase_template);

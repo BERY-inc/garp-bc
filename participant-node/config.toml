@@ -25,3 +25,13 @@ private_key_file = "participant.key"
 encryption_enabled = true
 signature_required = true
 trusted_peers = []
+
+[genesis]
+chain_id = "garp-devnet"
+genesis_time = "2024-01-01T00:00:00Z"
+initial_validators = ["participant-1"]
+
+[chain]
+slot_duration_ms = 1000
+epoch_length = 60
+rotation_interval_slots = 60

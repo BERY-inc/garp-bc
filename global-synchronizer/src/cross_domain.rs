@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
 
 use garp_common::{GarpResult, GarpError};
-use garp_common::types::{TransactionId, ParticipantId, DomainId};
+use garp_common::types::{TransactionId, ParticipantId};
 
 use crate::config::GlobalSyncConfig;
-use crate::storage::{GlobalStorage, GlobalBlock};
+use crate::storage::{GlobalStorage, GlobalBlock, DomainId};
 use crate::network::NetworkManager;
 use crate::discovery::DomainDiscovery;
 use crate::consensus::{ConsensusEngine, ConsensusResult};
@@ -22,7 +22,7 @@ pub struct CrossDomainCoordinator {
     config: Arc<GlobalSyncConfig>,
     
     /// Storage layer
-    storage: Arc<dyn GlobalStorage>,
+    storage: Arc<GlobalStorage>,
     
     /// Network manager
     network_manager: Arc<NetworkManager>,
@@ -648,7 +648,7 @@ impl CrossDomainCoordinator {
     /// Create new cross-domain coordinator
     pub async fn new(
         config: Arc<GlobalSyncConfig>,
-        storage: Arc<dyn GlobalStorage>,
+        storage: Arc<GlobalStorage>,
         network_manager: Arc<NetworkManager>,
         domain_discovery: Arc<DomainDiscovery>,
         consensus_engine: Arc<ConsensusEngine>,
@@ -850,7 +850,7 @@ impl CrossDomainCoordinator {
         let message = CrossDomainMessage {
             message_id: Uuid::new_v4().to_string(),
             message_type: CrossDomainMessageType::TransactionProposal(transaction.clone()),
-            source_domain: DomainId::new("global-synchronizer".to_string()),
+            source_domain: "global-synchronizer".to_string(),
             target_domain: domain_id.clone(),
             timestamp: chrono::Utc::now(),
             signature: Vec::new(), // TODO: Sign message
@@ -1090,7 +1090,7 @@ impl CrossDomainCoordinator {
                 for domain_id in domains_to_check {
                     // Send heartbeat request
                     let heartbeat = HeartbeatMessage {
-                        domain_id: DomainId::new("global-synchronizer".to_string()),
+                        domain_id: "global-synchronizer".to_string(),
                         block_height: 0,
                         transaction_count: 0,
                         status: DomainStatus::Active,
@@ -1100,7 +1100,7 @@ impl CrossDomainCoordinator {
                     let message = CrossDomainMessage {
                         message_id: Uuid::new_v4().to_string(),
                         message_type: CrossDomainMessageType::Heartbeat(heartbeat),
-                        source_domain: DomainId::new("global-synchronizer".to_string()),
+                        source_domain: "global-synchronizer".to_string(),
                         target_domain: domain_id.clone(),
                         timestamp: chrono::Utc::now(),
                         signature: Vec::new(),
@@ -1237,7 +1237,7 @@ impl CrossDomainCoordinator {
                     let message = CrossDomainMessage {
                         message_id: Uuid::new_v4().to_string(),
                         message_type: CrossDomainMessageType::StateSyncRequest(sync_request),
-                        source_domain: DomainId::new("global-synchronizer".to_string()),
+                        source_domain: "global-synchronizer".to_string(),
                         target_domain: domain_id.clone(),
                         timestamp: chrono::Utc::now(),
                         signature: Vec::new(),
@@ -1285,12 +1285,12 @@ impl CrossDomainMetrics {
 mod tests {
     use super::*;
     use crate::config::GlobalSyncConfig;
-    use crate::storage::MemoryGlobalStorage;
+    use crate::storage::GlobalStorage;
     
     #[tokio::test]
     async fn test_cross_domain_coordinator_creation() {
         let config = Arc::new(GlobalSyncConfig::default());
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(config.clone()).await.unwrap());
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await.unwrap());
         let domain_discovery = Arc::new(DomainDiscovery::new(config.clone()).await.unwrap());
         let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await.unwrap());
@@ -1309,7 +1309,7 @@ mod tests {
     #[tokio::test]
     async fn test_transaction_validation() {
         let config = Arc::new(GlobalSyncConfig::default());
-        let storage = Arc::new(MemoryGlobalStorage::new());
+        let storage = Arc::new(GlobalStorage::new(config.clone()).await.unwrap());
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await.unwrap());
         let domain_discovery = Arc::new(DomainDiscovery::new(config.clone()).await.unwrap());
         let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await.unwrap());
@@ -1323,9 +1323,9 @@ mod tests {
         ).await.unwrap();
         
         let transaction = CrossDomainTransaction {
-            transaction_id: TransactionId::new("test-tx".to_string()),
-            source_domain: DomainId::new("source".to_string()),
-            target_domains: vec![DomainId::new("target".to_string())],
+            transaction_id: TransactionId::new(),
+            source_domain: "source".to_string(),
+            target_domains: vec!["target".to_string()],
             transaction_type: CrossDomainTransactionType::AssetTransfer {
                 asset_id: "test-asset".to_string(),
                 amount: 100,

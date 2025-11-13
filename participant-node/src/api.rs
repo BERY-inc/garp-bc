@@ -31,6 +31,7 @@ use crate::{
     node::ParticipantNode,
     config::ApiConfig,
 };
+use crate::merkle::{merkle_proof, merkle_root, MerkleProof};
 
 /// API server for participant node
 pub struct ApiServer {
@@ -223,6 +224,38 @@ pub struct BlockDetailsDto {
     pub transactions: Vec<TransactionDto>,
 }
 
+/// Block summary DTO
+#[derive(Debug, Serialize)]
+pub struct BlockSummaryDto {
+    pub number: u64,
+    pub hash: String,
+    pub epoch: u64,
+    pub proposer: String,
+    pub timestamp: DateTime<Utc>,
+    pub transaction_count: u32,
+}
+
+/// Query parameters for listing blocks
+#[derive(Debug, Deserialize)]
+pub struct BlockListQuery {
+    pub limit: Option<usize>,
+    pub offset: Option<usize>,
+    pub epoch: Option<u64>,
+    pub proposer: Option<String>,
+}
+
+/// Merkle proof DTO for transaction inclusion
+#[derive(Debug, Serialize)]
+pub struct MerkleProofDto {
+    pub block_hash: String,
+    pub tx_id: String,
+    pub leaf_hash: String,
+    pub root: String,
+    pub path: Vec<String>,
+    pub directions: Vec<String>, // "left" or "right"
+    pub valid: bool,
+}
+
 /// Node statistics response
 #[derive(Debug, Serialize)]
 pub struct NodeStatsDto {
@@ -234,6 +267,28 @@ pub struct NodeStatsDto {
     pub network_peers: u64,
 }
 
+/// Contract event DTO
+#[derive(Debug, Serialize)]
+pub struct ContractEventDto {
+    pub id: String,
+    pub contract_id: String,
+    pub event_type: String,
+    pub data: serde_json::Value,
+    pub timestamp: DateTime<Utc>,
+    pub emitter: String,
+}
+
+/// Query parameters for listing events
+#[derive(Debug, Deserialize)]
+pub struct EventQueryParams {
+    pub contract_id: Option<String>,
+    pub event_type: Option<String>,
+    pub participant_id: Option<String>,
+    pub from_timestamp: Option<DateTime<Utc>>,
+    pub to_timestamp: Option<DateTime<Utc>>,
+    pub limit: Option<u32>,
+}
+
 impl ApiServer {
     /// Create new API server
     pub fn new(node: Arc<ParticipantNode>, config: ApiConfig) -> Self {
@@ -242,15 +297,22 @@ impl ApiServer {
 
     /// Create router with all endpoints
     pub fn create_router(&self) -> Router {
-        Router::new()
+    Router::new()
+            // JSON-RPC
+            .route("/rpc", post(json_rpc))
             // Transaction endpoints
             .route("/api/v1/transactions", post(submit_transaction))
             .route("/api/v1/transactions", get(list_transactions))
             .route("/api/v1/transactions/:id", get(get_transaction))
+            .route("/api/v1/transactions/simulate", post(simulate_transaction_v2))
             // Block endpoints (synthetic)
             .route("/api/v1/blocks/latest", get(get_latest_block))
             .route("/api/v1/blocks/:number", get(get_block_by_number))
             .route("/api/v1/blocks/hash/:hash", get(get_block_by_hash))
+            .route("/api/v1/blocks", get(list_blocks))
+            .route("/api/v1/blocks/:number/summary", get(get_block_summary))
+            .route("/api/v1/blocks/:number/tx/:tx_id/proof", get(get_tx_inclusion_proof))
+            .route("/api/v1/blocks/:number/state/:state_key/proof", get(get_state_change_proof))
             
             // Contract endpoints
             .route("/api/v1/contracts", post(create_contract))
@@ -269,12 +331,20 @@ impl ApiServer {
             .route("/api/v1/wallet/balances", get(get_wallet_balances))
             .route("/api/v1/wallet/history", get(get_wallet_history))
             
+            // Event endpoints
+            .route("/api/v1/events", get(list_events))
+            .route("/api/v1/events/contract/:contract_id", get(get_contract_events))
+            .route("/api/v1/events/participant/:participant_id", get(get_participant_events))
+            
             // Node endpoints
             .route("/api/v1/node/status", get(get_node_status))
             .route("/api/v1/node/stats", get(get_node_stats))
             .route("/api/v1/node/peers", get(get_node_peers))
             // Ledger checkpoint endpoint
             .route("/api/v1/ledger/checkpoint", get(get_ledger_checkpoint))
+            // Mempool endpoints
+            .route("/api/v1/mempool/submit", post(submit_mempool))
+            .route("/api/v1/mempool/stats", get(get_mempool_stats))
             
             // Template endpoints
             .route("/api/v1/templates", get(list_templates))
@@ -416,7 +486,7 @@ async fn get_transaction(
         }
     };
 
-    match node.get_ledger_view(&node.get_participant_id()).await {
+    match node.get_ledger_view().await {
         Ok(view) => {
             if let Some(transaction) = view.transactions.iter().find(|tx| tx.id == transaction_id) {
                 let dto = convert_transaction_to_dto(transaction);
@@ -451,21 +521,23 @@ async fn get_transaction(
 async fn get_latest_block(
     State(node): State<Arc<ParticipantNode>>,
 ) -> Result<Json<ApiResponse<BlockInfoDto>>, StatusCode> {
-    match node.get_ledger_view(&node.get_participant_id()).await {
-        Ok(view) => {
-            let tx_count = view.transaction_history.len() as u32;
-            let number = tx_count as u64;
+    let storage = node.get_storage();
+    match storage.get_latest_block().await {
+        Ok(Some(block)) => {
             let info = BlockInfoDto {
-                number,
-                hash: format!("0xblk{}", number),
-                parent_hash: if number > 0 { format!("0xblk{}", number - 1) } else { "0x0".to_string() },
-                timestamp: Utc::now(),
-                transaction_count: tx_count,
+                number: block.header.slot,
+                hash: hex::encode(&block.hash),
+                parent_hash: hex::encode(&block.header.parent_hash),
+                timestamp: block.timestamp,
+                transaction_count: block.transactions.len() as u32,
                 size: 1024,
                 gas_used: 0,
                 gas_limit: 0,
             };
             Ok(Json(ApiResponse { success: true, data: Some(info), error: None, timestamp: Utc::now() }))
+        }
+        Ok(None) => {
+            Ok(Json(ApiResponse { success: true, data: None, error: None, timestamp: Utc::now() }))
         }
         Err(e) => {
             error!("Failed to get latest block: {}", e);
@@ -479,21 +551,24 @@ async fn get_block_by_number(
     State(node): State<Arc<ParticipantNode>>,
     Path(number): Path<u64>,
 ) -> Result<Json<ApiResponse<BlockDetailsDto>>, StatusCode> {
-    match node.get_ledger_view(&node.get_participant_id()).await {
-        Ok(view) => {
-            let txs = view.transaction_history.iter().take(number as usize).cloned().collect::<Vec<_>>();
-            let transactions: Vec<TransactionDto> = txs.into_iter().map(convert_transaction_to_dto).collect();
+    let storage = node.get_storage();
+    match storage.get_block_by_slot(number).await {
+        Ok(Some(block)) => {
+            let transactions: Vec<TransactionDto> = block.transactions.iter().map(convert_transaction_to_dto).collect();
             let info = BlockInfoDto {
-                number,
-                hash: format!("0xblk{}", number),
-                parent_hash: if number > 0 { format!("0xblk{}", number - 1) } else { "0x0".to_string() },
-                timestamp: Utc::now(),
+                number: block.header.slot,
+                hash: hex::encode(&block.hash),
+                parent_hash: hex::encode(&block.header.parent_hash),
+                timestamp: block.timestamp,
                 transaction_count: transactions.len() as u32,
                 size: 1024,
                 gas_used: 0,
                 gas_limit: 0,
             };
             Ok(Json(ApiResponse { success: true, data: Some(BlockDetailsDto { info, transactions }), error: None, timestamp: Utc::now() }))
+        }
+        Ok(None) => {
+            Ok(Json(ApiResponse { success: true, data: None, error: None, timestamp: Utc::now() }))
         }
         Err(e) => {
             error!("Failed to get block {}: {}", number, e);
@@ -507,24 +582,166 @@ async fn get_block_by_hash(
     State(node): State<Arc<ParticipantNode>>,
     Path(hash): Path<String>,
 ) -> Result<Json<ApiResponse<BlockDetailsDto>>, StatusCode> {
-    match node.get_ledger_view(&node.get_participant_id()).await {
-        Ok(view) => {
-            let number = view.transaction_history.len() as u64;
+    let storage = node.get_storage();
+    match storage.get_block_by_hash_hex(&hash).await {
+        Ok(Some(block)) => {
+            let transactions: Vec<TransactionDto> = block.transactions.iter().map(convert_transaction_to_dto).collect();
             let info = BlockInfoDto {
-                number,
-                hash: hash.clone(),
-                parent_hash: if number > 0 { format!("0xblk{}", number - 1) } else { "0x0".to_string() },
-                timestamp: Utc::now(),
-                transaction_count: view.transaction_history.len() as u32,
+                number: block.header.slot,
+                hash: hex::encode(&block.hash),
+                parent_hash: hex::encode(&block.header.parent_hash),
+                timestamp: block.timestamp,
+                transaction_count: transactions.len() as u32,
                 size: 1024,
                 gas_used: 0,
                 gas_limit: 0,
             };
-            let transactions: Vec<TransactionDto> = view.transaction_history.into_iter().map(convert_transaction_to_dto).collect();
             Ok(Json(ApiResponse { success: true, data: Some(BlockDetailsDto { info, transactions }), error: None, timestamp: Utc::now() }))
+        }
+        Ok(None) => {
+            Ok(Json(ApiResponse { success: true, data: None, error: None, timestamp: Utc::now() }))
         }
         Err(e) => {
             error!("Failed to get block by hash {}: {}", hash, e);
+            Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: Utc::now() }))
+        }
+    }
+}
+
+/// List blocks with pagination
+async fn list_blocks(
+    State(node): State<Arc<ParticipantNode>>,
+    Query(query): Query<BlockListQuery>,
+) -> Result<Json<ApiResponse<Vec<BlockSummaryDto>>>, StatusCode> {
+    let storage = node.get_storage();
+    let limit = query.limit.unwrap_or(20).min(100);
+    let offset = query.offset.unwrap_or(0);
+    match storage.list_blocks_filtered(query.epoch, query.proposer.clone(), limit as u32, offset as u32).await {
+        Ok(blocks) => {
+            let items = blocks.into_iter().map(|b| BlockSummaryDto {
+                number: b.header.slot,
+                hash: hex::encode(&b.hash),
+                epoch: b.header.epoch,
+                proposer: b.header.proposer.0.clone(),
+                timestamp: b.timestamp,
+                transaction_count: b.transactions.len() as u32,
+            }).collect();
+            Ok(Json(ApiResponse { success: true, data: Some(items), error: None, timestamp: Utc::now() }))
+        }
+        Err(e) => {
+            error!("Failed to list blocks: {}", e);
+            Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: Utc::now() }))
+        }
+    }
+}
+
+/// Get block summary by number
+async fn get_block_summary(
+    State(node): State<Arc<ParticipantNode>>,
+    Path(number): Path<u64>,
+) -> Result<Json<ApiResponse<BlockSummaryDto>>, StatusCode> {
+    let storage = node.get_storage();
+    match storage.get_block_by_slot(number).await {
+        Ok(Some(block)) => {
+            let dto = BlockSummaryDto {
+                number: block.header.slot,
+                hash: hex::encode(&block.hash),
+                epoch: block.header.epoch,
+                proposer: block.header.proposer.0.clone(),
+                timestamp: block.timestamp,
+                transaction_count: block.transactions.len() as u32,
+            };
+            Ok(Json(ApiResponse { success: true, data: Some(dto), error: None, timestamp: Utc::now() }))
+        }
+        Ok(None) => Ok(Json(ApiResponse { success: true, data: None, error: None, timestamp: Utc::now() })),
+        Err(e) => {
+            error!("Failed to get block summary {}: {}", number, e);
+            Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: Utc::now() }))
+        }
+    }
+}
+
+/// Get Merkle proof for transaction inclusion in a block
+async fn get_tx_inclusion_proof(
+    State(node): State<Arc<ParticipantNode>>,
+    Path((number, tx_id)): Path<(u64, String)>,
+) -> Result<Json<ApiResponse<MerkleProofDto>>, StatusCode> {
+    let storage = node.get_storage();
+    match storage.get_block_by_slot(number).await {
+        Ok(Some(block)) => {
+            let leaves: Vec<Vec<u8>> = block.transactions.iter().map(|tx| tx.id.0.as_bytes().to_vec()).collect();
+            let index = block.transactions.iter().position(|tx| tx.id.0 == tx_id);
+            if let Some(idx) = index {
+                if let Some(proof) = merkle_proof(&leaves, idx) {
+                    let dto = MerkleProofDto {
+                        block_hash: hex::encode(&block.hash),
+                        tx_id: tx_id.clone(),
+                        leaf_hash: hex::encode(&proof.leaf),
+                        root: hex::encode(&proof.root),
+                        path: proof.path.iter().map(|p| hex::encode(p)).collect(),
+                        directions: proof.directions.iter().map(|d| if *d { "right".to_string() } else { "left".to_string() }).collect(),
+                        valid: crate::merkle::verify_proof(&proof),
+                    };
+                    Ok(Json(ApiResponse { success: true, data: Some(dto), error: None, timestamp: Utc::now() }))
+                } else {
+                    Ok(Json(ApiResponse { success: false, data: None, error: Some("Proof generation failed".to_string()), timestamp: Utc::now() }))
+                }
+            } else {
+                Ok(Json(ApiResponse { success: false, data: None, error: Some("Transaction not in block".to_string()), timestamp: Utc::now() }))
+            }
+        }
+        Ok(None) => Ok(Json(ApiResponse { success: false, data: None, error: Some("Block not found".to_string()), timestamp: Utc::now() })),
+        Err(e) => {
+            error!("Failed to get tx proof in block {}: {}", number, e);
+            Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: Utc::now() }))
+        }
+    }
+}
+
+/// Get Merkle proof for a state key change in a block
+async fn get_state_change_proof(
+    State(node): State<Arc<ParticipantNode>>,
+    Path((number, state_key)): Path<(u64, String)>,
+) -> Result<Json<ApiResponse<MerkleProofDto>>, StatusCode> {
+    use crate::state_commitments::leaves_for_changes;
+    let storage = node.get_storage();
+    match storage.get_block_by_slot(number).await {
+        Ok(Some(block)) => {
+            let changes = match storage.get_block_state_changes(number).await {
+                Ok(items) => items,
+                Err(e) => {
+                    error!("Failed to load state changes for slot {}: {}", number, e);
+                    return Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: Utc::now() }));
+                }
+            };
+            // Find the first change matching the requested key
+            let index = changes.iter().position(|c| c.key == state_key);
+            if let Some(idx) = index {
+                let leaves = leaves_for_changes(&changes);
+                if let Some(proof) = merkle_proof(&leaves, idx) {
+                    // Verify computed root matches block header's state_root and proof validity
+                    let root_matches = proof.root == block.header.state_root;
+                    let valid = crate::merkle::verify_proof(&proof) && root_matches;
+                    let dto = MerkleProofDto {
+                        block_hash: hex::encode(&block.hash),
+                        tx_id: state_key.clone(), // reuse field to carry state_key
+                        leaf_hash: hex::encode(&proof.leaf),
+                        root: hex::encode(&proof.root),
+                        path: proof.path.iter().map(|p| hex::encode(p)).collect(),
+                        directions: proof.directions.iter().map(|d| if *d { "right".to_string() } else { "left".to_string() }).collect(),
+                        valid,
+                    };
+                    Ok(Json(ApiResponse { success: true, data: Some(dto), error: None, timestamp: Utc::now() }))
+                } else {
+                    Ok(Json(ApiResponse { success: false, data: None, error: Some("Proof generation failed".to_string()), timestamp: Utc::now() }))
+                }
+            } else {
+                Ok(Json(ApiResponse { success: false, data: None, error: Some("State key not changed in block".to_string()), timestamp: Utc::now() }))
+            }
+        }
+        Ok(None) => Ok(Json(ApiResponse { success: false, data: None, error: Some("Block not found".to_string()), timestamp: Utc::now() })),
+        Err(e) => {
+            error!("Failed to get state proof in block {}: {}", number, e);
             Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: Utc::now() }))
         }
     }
@@ -1094,6 +1311,291 @@ async fn health_check() -> Result<Json<ApiResponse<String>>, StatusCode> {
     }))
 }
 
+// ------------ JSON-RPC (Solana-like) ------------
+#[derive(Debug, Deserialize)]
+struct JsonRpcRequest {
+    pub method: String,
+    pub params: Option<serde_json::Value>,
+    pub id: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonRpcError {
+    pub code: i32,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct JsonRpcResponse {
+    pub jsonrpc: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<JsonRpcError>,
+    pub id: Option<serde_json::Value>,
+}
+
+const RPC_INVALID_REQUEST: i32 = -32600;
+const RPC_METHOD_NOT_FOUND: i32 = -32601;
+const RPC_INVALID_PARAMS: i32 = -32602;
+const RPC_INTERNAL_ERROR: i32 = -32603;
+const RPC_SERVER_ERROR: i32 = -32000;
+
+fn rpc_error(code: i32, message: impl Into<String>, id: Option<serde_json::Value>) -> JsonRpcResponse {
+    JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        result: None,
+        error: Some(JsonRpcError { code, message: message.into(), data: None }),
+        id,
+    }
+}
+
+async fn handle_single_rpc(node: Arc<ParticipantNode>, req: JsonRpcRequest) -> JsonRpcResponse {
+    let mut error: Option<JsonRpcError> = None;
+    let mut result: Option<serde_json::Value> = None;
+
+    match req.method.as_str() {
+        // Timing and consensus
+        "getSlot" => {
+            let (genesis, slot_duration_ms) = node.get_timing_params();
+            let now = Utc::now();
+            let slot = garp_common::timing::slot_at_time(genesis, slot_duration_ms, now);
+            result = Some(serde_json::json!(slot));
+        }
+        "getSlotLeader" => {
+            let (genesis, slot_duration_ms) = node.get_timing_params();
+            let now = Utc::now();
+            // Optional param: slot
+            let slot = if let Some(p) = &req.params {
+                p.get("slot").and_then(|v| v.as_u64()).unwrap_or_else(|| garp_common::timing::slot_at_time(genesis, slot_duration_ms, now))
+            } else {
+                garp_common::timing::slot_at_time(genesis, slot_duration_ms, now)
+            };
+            let validators = node.get_validators();
+            if let Some(leader) = crate::consensus::leader_for_slot(slot, &validators) {
+                result = Some(serde_json::json!(leader.0));
+            } else {
+                error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: "No validators configured".to_string(), data: None });
+            }
+        }
+        // Blocks
+        "getBlock" => {
+            let storage = node.get_storage();
+            if let Some(params) = &req.params {
+                if let Some(number) = params.get("slot").and_then(|v| v.as_u64()) {
+                    match storage.get_block_by_slot(number).await {
+                        Ok(Some(block)) => {
+                            let txs: Vec<serde_json::Value> = block.transactions.iter().map(|t| serde_json::json!({
+                                "id": t.id.0.to_string(),
+                                "submitter": t.submitter.0,
+                                "timestamp": t.created_at,
+                            })).collect();
+                            result = Some(serde_json::json!({
+                                "slot": block.header.slot,
+                                "hash": hex::encode(&block.hash),
+                                "parentHash": hex::encode(&block.header.parent_hash),
+                                "timestamp": block.timestamp,
+                                "transactions": txs,
+                            }));
+                        }
+                        Ok(None) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: "Block not found".to_string(), data: None }); }
+                        Err(e) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: e.to_string(), data: None }); }
+                    }
+                } else if let Some(hash_hex) = params.get("hash").and_then(|v| v.as_str()) {
+                    match storage.get_block_by_hash_hex(hash_hex).await {
+                        Ok(Some(block)) => {
+                            let txs: Vec<serde_json::Value> = block.transactions.iter().map(|t| serde_json::json!({
+                                "id": t.id.0.to_string(),
+                                "submitter": t.submitter.0,
+                                "timestamp": t.created_at,
+                            })).collect();
+                            result = Some(serde_json::json!({
+                                "slot": block.header.slot,
+                                "hash": hex::encode(&block.hash),
+                                "parentHash": hex::encode(&block.header.parent_hash),
+                                "timestamp": block.timestamp,
+                                "transactions": txs,
+                            }));
+                        }
+                        Ok(None) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: "Block not found".to_string(), data: None }); }
+                        Err(e) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: e.to_string(), data: None }); }
+                    }
+                } else {
+                    error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing parameter: slot or hash".to_string(), data: None });
+                }
+            } else {
+                error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing params".to_string(), data: None });
+            }
+        }
+        // Transactions
+        "getTransaction" => {
+            let storage = node.get_storage();
+            if let Some(params) = &req.params {
+                if let Some(id_str) = params.get("signature").and_then(|v| v.as_str()) {
+                    match uuid::Uuid::parse_str(id_str) {
+                        Ok(uuid) => {
+                            match storage.get_transaction(&garp_common::TransactionId(uuid)).await {
+                                Ok(Some(tx)) => {
+                                    result = Some(serde_json::json!({
+                                        "id": tx.id.0.to_string(),
+                                        "submitter": tx.submitter.0,
+                                        "timestamp": tx.created_at,
+                                        "command": tx.command,
+                                    }));
+                                }
+                                Ok(None) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: "Transaction not found".to_string(), data: None }); }
+                                Err(e) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: e.to_string(), data: None }); }
+                            }
+                        }
+                        Err(_) => error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Invalid signature".to_string(), data: None }),
+                    }
+                } else {
+                    error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing parameter: signature".to_string(), data: None });
+                }
+            } else {
+                error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing params".to_string(), data: None });
+            }
+        }
+        "getBalance" => {
+            // Params: participantId, optional assetId
+            if let Some(params) = &req.params {
+                let participant_id = params.get("participantId").and_then(|v| v.as_str()).map(|s| garp_common::ParticipantId(s.to_string()));
+                if let Some(_pid) = participant_id {
+                    match node.get_wallet_balance().await {
+                        Ok(Some(balance)) => {
+                            if let Some(asset_id) = params.get("assetId").and_then(|v| v.as_str()) {
+                                let amount = balance.assets.iter().find(|a| a.id == asset_id).map(|a| a.amount as f64).unwrap_or(0.0);
+                                result = Some(serde_json::json!({"balance": amount, "assetId": asset_id}));
+                            } else {
+                                let total: f64 = balance.assets.iter().map(|a| a.amount as f64).sum();
+                                result = Some(serde_json::json!({"balance": total}));
+                            }
+                        }
+                        Ok(None) => { result = Some(serde_json::json!({"balance": 0.0})); }
+                        Err(e) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: e.to_string(), data: None }); }
+                    }
+                } else {
+                    error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing parameter: participantId".to_string(), data: None });
+                }
+            } else {
+                error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing params".to_string(), data: None });
+            }
+        }
+        // Node info
+        "getVersion" => {
+            result = Some(serde_json::json!({"version": env!("CARGO_PKG_VERSION")}));
+        }
+        "getHealth" => {
+            result = Some(serde_json::json!("ok"));
+        }
+        // Transaction submission and simulation
+        "sendTransaction" => {
+            if let Some(params) = &req.params {
+                // Expect { command: TransactionCommandDto }
+                match serde_json::from_value::<TransactionCommandDto>(params.get("command").cloned().unwrap_or(serde_json::Value::Null)) {
+                    Ok(cmd_dto) => {
+                        match convert_transaction_command(cmd_dto) {
+                            Ok(command) => {
+                                let tx = garp_common::Transaction {
+                                    id: garp_common::TransactionId(uuid::Uuid::new_v4()),
+                                    submitter: node.get_participant_id(),
+                                    command,
+                                    created_at: Utc::now(),
+                                    signatures: vec![],
+                                    encrypted_payload: None,
+                                };
+                                match node.submit_transaction(tx).await {
+                                    Ok(vr) => {
+                                        result = Some(serde_json::json!({"accepted": true, "status": format!("{:?}", vr)}));
+                                    }
+                                    Err(e) => { error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: e.to_string(), data: None }); }
+                                }
+                            }
+                            Err(e) => error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: e.to_string(), data: None }),
+                        }
+                    }
+                    Err(_) => error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Invalid command".to_string(), data: None }),
+                }
+            } else {
+                error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing params".to_string(), data: None });
+            }
+        }
+        "simulateTransaction" => {
+            if let Some(params) = &req.params {
+                match serde_json::from_value::<SimulationRequestDto>(params.clone()) {
+                    Ok(sim) => {
+                        match convert_simulation_request_to_tx_v2(sim) {
+                            Ok(txv2) => {
+                                match node.simulate_transaction_v2(&txv2).await {
+                                    Ok(res) => {
+                                        result = Some(serde_json::json!({
+                                            "accepted": res.accepted,
+                                            "estimatedFeeLamports": res.estimated_fee_lamports,
+                                            "logs": res.logs,
+                                        }));
+                                    }
+                                    Err(e) => error = Some(JsonRpcError { code: RPC_SERVER_ERROR, message: e.to_string(), data: None }),
+                                }
+                            }
+                            Err(e) => error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: e.to_string(), data: None }),
+                        }
+                    }
+                    Err(_) => error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Invalid simulation params".to_string(), data: None }),
+                }
+            } else {
+                error = Some(JsonRpcError { code: RPC_INVALID_PARAMS, message: "Missing params".to_string(), data: None });
+            }
+        }
+        _ => {
+            error = Some(JsonRpcError { code: RPC_METHOD_NOT_FOUND, message: format!("Unknown method: {}", req.method), data: None });
+        }
+    }
+
+    JsonRpcResponse {
+        jsonrpc: "2.0".to_string(),
+        result,
+        error,
+        id: req.id,
+    }
+}
+
+/// JSON-RPC entrypoint supporting single and batch requests
+async fn json_rpc(
+    State(node): State<Arc<ParticipantNode>>,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if body.is_array() {
+        let mut responses: Vec<serde_json::Value> = Vec::new();
+        for item in body.as_array().unwrap() {
+            let req: Result<JsonRpcRequest, _> = serde_json::from_value(item.clone());
+            match req {
+                Ok(r) => {
+                    let resp = handle_single_rpc(node.clone(), r).await;
+                    responses.push(serde_json::to_value(resp).unwrap_or_else(|_| serde_json::json!(rpc_error(RPC_INTERNAL_ERROR, "Failed to serialize response", None))));
+                }
+                Err(_) => {
+                    let id = item.get("id").cloned();
+                    responses.push(serde_json::json!(rpc_error(RPC_INVALID_REQUEST, "Invalid request", id)));
+                }
+            }
+        }
+        Ok(Json(serde_json::Value::Array(responses)))
+    } else if body.is_object() {
+        let req: Result<JsonRpcRequest, _> = serde_json::from_value(body.clone());
+        match req {
+            Ok(r) => {
+                let resp = handle_single_rpc(node, r).await;
+                Ok(Json(serde_json::to_value(resp).unwrap_or_else(|_| serde_json::json!(rpc_error(RPC_INTERNAL_ERROR, "Failed to serialize response", None)))))
+            }
+            Err(_) => Ok(Json(serde_json::json!(rpc_error(RPC_INVALID_REQUEST, "Invalid request", body.get("id").cloned())))),
+        }
+    } else {
+        Ok(Json(serde_json::json!(rpc_error(RPC_INVALID_REQUEST, "Invalid request payload", None))))
+    }
+}
+
 // Helper functions for converting between domain types and DTOs
 
 fn convert_transaction_command(dto: TransactionCommandDto) -> GarpResult<TransactionCommand> {
@@ -1222,6 +1724,142 @@ fn convert_wallet_balance_to_dto(balance: &WalletBalance) -> WalletBalanceDto {
         last_updated: balance.last_updated,
     }
 }
+
+/// List events with query parameters
+async fn list_events(
+    State(node): State<Arc<ParticipantNode>>,
+    Query(query): Query<EventQueryParams>,
+) -> Result<Json<ApiResponse<Vec<ContractEventDto>>>, StatusCode> {
+    let event_query = crate::storage::EventQuery {
+        contract_id: query.contract_id.and_then(|id| Uuid::parse_str(&id).ok()).map(garp_common::ContractId),
+        event_type: query.event_type,
+        participant_id: query.participant_id.map(garp_common::ParticipantId),
+        from_timestamp: query.from_timestamp,
+        to_timestamp: query.to_timestamp,
+        limit: query.limit,
+    };
+
+    match node.get_storage().query_events(&event_query).await {
+        Ok(events) => {
+            let event_dtos: Vec<ContractEventDto> = events
+                .into_iter()
+                .map(|event| ContractEventDto {
+                    id: event.id,
+                    contract_id: event.contract_id.0.to_string(),
+                    event_type: event.event_type,
+                    data: event.data,
+                    timestamp: event.timestamp,
+                    emitter: event.emitter.0,
+                })
+                .collect();
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(event_dtos),
+                error: None,
+                timestamp: Utc::now(),
+            }))
+        }
+        Err(e) => {
+            error!("Failed to list events: {}", e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+                timestamp: Utc::now(),
+            }))
+        }
+    }
+}
+
+/// Get events for a specific contract
+async fn get_contract_events(
+    State(node): State<Arc<ParticipantNode>>,
+    Path(contract_id): Path<String>,
+) -> Result<Json<ApiResponse<Vec<ContractEventDto>>>, StatusCode> {
+    let contract_uuid = match Uuid::parse_str(&contract_id) {
+        Ok(uuid) => uuid,
+        Err(_) => {
+            return Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some("Invalid contract ID".to_string()),
+                timestamp: Utc::now(),
+            }));
+        }
+    };
+
+    match node.get_storage().get_contract_events(&garp_common::ContractId(contract_uuid), Some(100)).await {
+        Ok(events) => {
+            let event_dtos: Vec<ContractEventDto> = events
+                .into_iter()
+                .map(|event| ContractEventDto {
+                    id: event.id,
+                    contract_id: event.contract_id.0.to_string(),
+                    event_type: event.event_type,
+                    data: event.data,
+                    timestamp: event.timestamp,
+                    emitter: event.emitter.0,
+                })
+                .collect();
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(event_dtos),
+                error: None,
+                timestamp: Utc::now(),
+            }))
+        }
+        Err(e) => {
+            error!("Failed to get contract events: {}", e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+                timestamp: Utc::now(),
+            }))
+        }
+    }
+}
+
+/// Get events emitted by a specific participant
+async fn get_participant_events(
+    State(node): State<Arc<ParticipantNode>>,
+    Path(participant_id): Path<String>,
+) -> Result<Json<ApiResponse<Vec<ContractEventDto>>>, StatusCode> {
+    match node.get_storage().get_participant_events(&garp_common::ParticipantId(participant_id), Some(100)).await {
+        Ok(events) => {
+            let event_dtos: Vec<ContractEventDto> = events
+                .into_iter()
+                .map(|event| ContractEventDto {
+                    id: event.id,
+                    contract_id: event.contract_id.0.to_string(),
+                    event_type: event.event_type,
+                    data: event.data,
+                    timestamp: event.timestamp,
+                    emitter: event.emitter.0,
+                })
+                .collect();
+
+            Ok(Json(ApiResponse {
+                success: true,
+                data: Some(event_dtos),
+                error: None,
+                timestamp: Utc::now(),
+            }))
+        }
+        Err(e) => {
+            error!("Failed to get participant events: {}", e);
+            Ok(Json(ApiResponse {
+                success: false,
+                data: None,
+                error: Some(e.to_string()),
+                timestamp: Utc::now(),
+            }))
+        }
+    }
+}
+
 /// Ledger state DTO
 #[derive(Debug, Serialize)]
 pub struct LedgerStateDto {
@@ -1255,7 +1893,7 @@ async fn get_ledger_checkpoint(
         }
     }
 }
-async fn auth_middleware<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> Result<axum::response::Response, axum::http::StatusCode> {
+    async fn auth_middleware<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> Result<axum::response::Response, axum::http::StatusCode> {
     let required = std::env::var("PARTICIPANT_API_TOKEN").ok();
     if let Some(expected) = required {
         if let Some(header) = req.headers().get(axum::http::header::AUTHORIZATION) {
@@ -1271,4 +1909,183 @@ async fn auth_middleware<B>(req: axum::http::Request<B>, next: middleware::Next<
         return Err(axum::http::StatusCode::UNAUTHORIZED);
     }
     Ok(next.run(req).await)
+}
+
+// -----------------------------------------------------------------------------
+// TxV2 Simulation DTOs and handler
+// -----------------------------------------------------------------------------
+#[derive(Debug, Deserialize)]
+pub struct SignatureDto {
+    pub algorithm: String,
+    pub signature: String, // hex
+    pub public_key: String, // hex
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DurableNonceDto {
+    pub nonce: String, // hex
+    pub authority: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ComputeBudgetDto {
+    pub max_units: u64,
+    pub heap_bytes: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AccountAccessDto {
+    pub account: String,
+    pub is_signer: bool,
+    pub is_writable: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SimulationInstructionDto {
+    pub program: String,
+    pub accounts: Vec<AccountAccessDto>,
+    pub data: String, // hex
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SimulationRequestDto {
+    pub fee_payer: String,
+    pub signatures: Vec<SignatureDto>,
+    pub recent_blockhash: String, // hex
+    pub slot: u64,
+    pub durable_nonce: Option<DurableNonceDto>,
+    pub compute_budget: Option<ComputeBudgetDto>,
+    pub account_keys: Vec<String>,
+    pub instructions: Vec<SimulationInstructionDto>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SimulationResponseDto {
+    pub accepted: bool,
+    pub estimated_fee_lamports: u64,
+    pub logs: Vec<String>,
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    hex::decode(s).map_err(|e| format!("invalid hex: {}", e))
+}
+
+fn convert_simulation_request_to_tx_v2(req: SimulationRequestDto) -> garp_common::GarpResult<garp_common::TxV2> {
+    // Convert signatures
+    let signatures: Vec<garp_common::Signature> = req.signatures.into_iter().map(|sd| {
+        let sig = hex_decode(&sd.signature).map_err(|e| garp_common::GarpError::BadRequest(e))?;
+        let pk = hex_decode(&sd.public_key).map_err(|e| garp_common::GarpError::BadRequest(e))?;
+        Ok(garp_common::Signature { algorithm: sd.algorithm, signature: sig, public_key: pk })
+    }).collect::<Result<_, _>>()?;
+
+    // Recent blockhash
+    let rb = garp_common::RecentBlockhash(hex_decode(&req.recent_blockhash).map_err(garp_common::GarpError::BadRequest)?);
+
+    // Durable nonce
+    let durable = if let Some(dn) = req.durable_nonce {
+        Some(garp_common::DurableNonce { nonce: hex_decode(&dn.nonce).map_err(garp_common::GarpError::BadRequest)?, authority: garp_common::AccountId(dn.authority) })
+    } else { None };
+
+    // Compute budget
+    let budget = req.compute_budget.map(|b| garp_common::ComputeBudget { max_units: b.max_units, heap_bytes: b.heap_bytes });
+
+    // Account keys
+    let account_keys: Vec<garp_common::AccountId> = req.account_keys.into_iter().map(garp_common::AccountId).collect();
+
+    // Instructions
+    let instructions: Vec<garp_common::ProgramInstruction> = req.instructions.into_iter().map(|ix| {
+        let program = garp_common::ProgramId(ix.program);
+        let accounts: Vec<garp_common::AccountMeta> = ix.accounts.into_iter().map(|a| garp_common::AccountMeta { account: garp_common::AccountId(a.account), is_signer: a.is_signer, is_writable: a.is_writable }).collect();
+        let data = hex_decode(&ix.data).map_err(|e| garp_common::GarpError::BadRequest(e))?;
+        Ok(garp_common::ProgramInstruction { program, accounts, data })
+    }).collect::<Result<_, _>>()?;
+
+    Ok(garp_common::TxV2 {
+        id: garp_common::TransactionId(uuid::Uuid::new_v4()),
+        fee_payer: garp_common::AccountId(req.fee_payer),
+        signatures,
+        recent_blockhash: rb,
+        slot: req.slot,
+        durable_nonce: durable,
+        compute_budget: budget,
+        account_keys,
+        instructions,
+        created_at: chrono::Utc::now(),
+    })
+}
+
+async fn simulate_transaction_v2(
+    State(node): State<Arc<ParticipantNode>>,
+    Json(req): Json<SimulationRequestDto>,
+) -> Result<Json<ApiResponse<SimulationResponseDto>>, StatusCode> {
+    let tx = match convert_simulation_request_to_tx_v2(req) {
+        Ok(t) => t,
+        Err(e) => {
+            return Ok(Json(ApiResponse { success: false, data: None, error: Some(format!("bad request: {}", e)), timestamp: chrono::Utc::now() })));
+        }
+    };
+    match node.simulate_transaction_v2(&tx).await {
+        Ok(sim) => {
+            let dto = SimulationResponseDto { accepted: sim.accepted, estimated_fee_lamports: sim.estimated_fee_lamports, logs: sim.logs };
+            Ok(Json(ApiResponse { success: true, data: Some(dto), error: None, timestamp: chrono::Utc::now() }))
+        }
+        Err(e) => {
+            Ok(Json(ApiResponse { success: false, data: None, error: Some(e.to_string()), timestamp: chrono::Utc::now() }))
+        }
+    }
+}
+/// Mempool submission request
+#[derive(Debug, Deserialize)]
+pub struct SubmitMempoolRequest {
+    pub fee: u64,
+    pub command: TransactionCommandDto,
+}
+
+/// Mempool submission response
+#[derive(Debug, Serialize)]
+pub struct SubmitMempoolResponse {
+    pub id: String,
+    pub accepted: bool,
+}
+
+/// Submit a transaction to the mempool with a fee
+async fn submit_mempool(
+    State(node): State<Arc<ParticipantNode>>,
+    Json(request): Json<SubmitMempoolRequest>,
+) -> Result<Json<ApiResponse<SubmitMempoolResponse>>, StatusCode> {
+    let command = convert_transaction_command(request.command)
+        .map_err(|e| {
+            warn!("Invalid transaction command: {}", e);
+            StatusCode::BAD_REQUEST
+        })?;
+
+    let tx = garp_common::Transaction {
+        id: garp_common::TransactionId::new(),
+        submitter: node.get_participant_id(),
+        command,
+        created_at: Utc::now(),
+        signatures: vec![],
+        encrypted_payload: None,
+    };
+
+    if let Err(e) = node.submit_to_mempool(tx.clone(), request.fee).await {
+        error!("Failed to submit to mempool: {}", e);
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let resp = SubmitMempoolResponse { id: tx.id.0.to_string(), accepted: true };
+    Ok(Json(ApiResponse { success: true, data: Some(resp), error: None, timestamp: Utc::now() }))
+}
+
+/// Basic mempool stats (count only for now)
+#[derive(Debug, Serialize)]
+pub struct MempoolStatsDto {
+    pub count: usize,
+}
+
+async fn get_mempool_stats(
+    State(node): State<Arc<ParticipantNode>>,
+) -> Result<Json<ApiResponse<MempoolStatsDto>>, StatusCode> {
+    let count = node.get_mempool_batch(usize::MAX).await.len();
+    Ok(Json(ApiResponse { success: true, data: Some(MempoolStatsDto { count }), error: None, timestamp: Utc::now() }))
 }

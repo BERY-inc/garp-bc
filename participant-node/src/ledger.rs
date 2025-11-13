@@ -1,7 +1,8 @@
 use garp_common::{
     Contract, Transaction, TransactionId, ContractId, ParticipantId, Asset, WalletBalance,
     TransactionCommand, CreateContractCommand, ExerciseContractCommand, ArchiveContractCommand,
-    GarpResult, GarpError, TransactionError, CryptoService, DigitalSignature
+    GarpResult, GarpError, TransactionError, CryptoService, DigitalSignature,
+    AccountId, ProgramId, TxV2, AccountMeta, RecentBlockhash,
 };
 use crate::storage::{StorageBackend, LedgerState};
 use chrono::{DateTime, Utc};
@@ -10,12 +11,24 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use uuid::Uuid;
 use tracing::{info, warn, error, debug};
+use bytes::Bytes;
+use crate::poh::Poh;
+use tokio::time::Duration as TokioDuration;
 
 /// Local ledger for a participant node
 pub struct LocalLedger {
     participant_id: ParticipantId,
     storage: Arc<dyn StorageBackend>,
     crypto_service: Arc<CryptoService>,
+    // Accounts-as-state store
+    accounts: parking_lot::RwLock<HashMap<AccountId, Account>>,
+    account_locks: parking_lot::Mutex<HashSet<AccountId>>,
+    recent_blockhashes: parking_lot::RwLock<Vec<RecentBlockhash>>, // rolling window
+    // PoH and append-only entries
+    poh: parking_lot::Mutex<Poh>,
+    last_tick_slot: parking_lot::RwLock<u64>,
+    tick_count_in_slot: parking_lot::RwLock<u64>,
+    ledger_entries: parking_lot::RwLock<Vec<LedgerEntry>>, // append-only tick/tx entries
 }
 
 /// Transaction validation result
@@ -49,6 +62,13 @@ impl LocalLedger {
             participant_id,
             storage,
             crypto_service,
+            accounts: parking_lot::RwLock::new(HashMap::new()),
+            account_locks: parking_lot::Mutex::new(HashSet::new()),
+            recent_blockhashes: parking_lot::RwLock::new(Vec::with_capacity(512)),
+            poh: parking_lot::Mutex::new(Poh::new(participant_id.0.as_bytes(), 32)),
+            last_tick_slot: parking_lot::RwLock::new(0),
+            tick_count_in_slot: parking_lot::RwLock::new(0),
+            ledger_entries: parking_lot::RwLock::new(Vec::with_capacity(4096)),
         }
     }
 
@@ -63,6 +83,7 @@ impl LocalLedger {
             return Ok(validation);
         }
 
+        // Append transaction entry (slot will be filled by caller via record_transaction_entry)
         // Store transaction
         self.storage.store_transaction(&transaction).await?;
 
@@ -71,6 +92,41 @@ impl LocalLedger {
 
         info!("Transaction {} successfully applied", transaction.id.0);
         Ok(validation)
+    }
+
+    /// Record a PoH tick and enforce slot boundaries
+    pub fn record_poh_tick(&self, current_slot: u64) {
+        let mut poh = self.poh.lock();
+        let hash = poh.tick();
+        {
+            let mut last_slot = self.last_tick_slot.write();
+            let mut tick_count = self.tick_count_in_slot.write();
+            if *last_slot != current_slot {
+                *last_slot = current_slot;
+                *tick_count = 0;
+            }
+            *tick_count += 1;
+        }
+        // Record in append-only ledger entries
+        self.ledger_entries.write().push(LedgerEntry::Tick {
+            slot: current_slot,
+            hash: hash.to_vec(),
+        });
+        // Update recent blockhash window at slot boundary
+        if poh.ticks_in_current_slot() == 0 {
+            self.record_recent_blockhash(RecentBlockhash(hash.to_vec()));
+        }
+    }
+
+    /// Record a transaction entry, interleaved after ticks
+    pub fn record_transaction_entry(&self, tx_id: TransactionId, slot: u64) {
+        self.ledger_entries.write().push(LedgerEntry::TransactionEntry { slot, tx_id });
+    }
+
+    /// Compute the PoH tick interval based on chain slot duration and ticks per slot
+    pub fn tick_interval(&self, slot_duration_ms: u64) -> TokioDuration {
+        let ticks_per_slot = self.poh.lock().ticks_per_slot();
+        TokioDuration::from_millis(slot_duration_ms / ticks_per_slot.max(1))
     }
 
     /// Validate a transaction against the current ledger state
@@ -480,6 +536,200 @@ impl LocalLedger {
     }
 }
 
+// ----------------------------------------------------------------------------
+// Accounts-as-state model
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Account {
+    pub id: AccountId,
+    pub lamports: u64,
+    pub owner: ProgramId,
+    pub data: Bytes,
+    pub executable: bool,
+    pub rent_epoch: u64,
+}
+
+impl Account {
+    pub fn data_len(&self) -> usize { self.data.len() }
+}
+
+/// Rent parameters
+#[derive(Debug, Clone)]
+pub struct RentParams {
+    pub lamports_per_byte_year: u64,
+    pub exemption_multiplier: f64,
+}
+
+impl Default for RentParams {
+    fn default() -> Self {
+        Self { lamports_per_byte_year: 3480, exemption_multiplier: 2.0 }
+    }
+}
+
+impl LocalLedger {
+    /// Create a new account
+    pub fn create_account(&self, id: AccountId, owner: ProgramId, lamports: u64, data: Bytes, executable: bool) {
+        let mut accounts = self.accounts.write();
+        accounts.insert(id.clone(), Account { id, lamports, owner, data, executable, rent_epoch: 0 });
+    }
+
+    /// Get zero-copy account data slice
+    pub fn get_account_data_zero_copy(&self, id: &AccountId) -> Option<Bytes> {
+        self.accounts.read().get(id).map(|a| a.data.clone())
+    }
+
+    /// Lock accounts for a transaction (write locks)
+    pub fn lock_accounts(&self, metas: &[AccountMeta]) -> GarpResult<()> {
+        let mut locks = self.account_locks.lock();
+        for m in metas.iter().filter(|m| m.is_writable) {
+            if locks.contains(&m.account) {
+                return Err(GarpError::Internal(format!("Account {} already locked", (m.account).0)));
+            }
+        }
+        for m in metas.iter().filter(|m| m.is_writable) {
+            locks.insert(m.account.clone());
+        }
+        Ok(())
+    }
+
+    /// Unlock accounts after a transaction
+    pub fn unlock_accounts(&self, metas: &[AccountMeta]) {
+        let mut locks = self.account_locks.lock();
+        for m in metas.iter().filter(|m| m.is_writable) {
+            locks.remove(&m.account);
+        }
+    }
+
+    /// Enforce program ownership for writable accounts
+    pub fn enforce_program_ownership(&self, metas: &[AccountMeta], program: &ProgramId) -> GarpResult<()> {
+        let accounts = self.accounts.read();
+        for m in metas.iter().filter(|m| m.is_writable) {
+            let Some(acc) = accounts.get(&m.account) else {
+                return Err(GarpError::Internal(format!("Missing account {}", (m.account).0)));
+            };
+            if &acc.owner != program {
+                return Err(GarpError::Internal(format!("Program ownership violation for {}", (m.account).0)));
+            }
+        }
+        Ok(())
+    }
+
+    /// Check rent exemption threshold for an account
+    pub fn is_rent_exempt(&self, acc: &Account, params: &RentParams) -> bool {
+        let threshold = (acc.data_len() as f64 * params.exemption_multiplier) as u64 * params.lamports_per_byte_year;
+        acc.lamports >= threshold
+    }
+
+    /// Apply rent to inactive accounts; purge those that run out of lamports
+    pub fn apply_rent(&self, current_epoch: u64, params: &RentParams) {
+        let mut accounts = self.accounts.write();
+        accounts.retain(|_id, acc| {
+            if acc.executable { return true; }
+            // simplistic: charge per epoch based on data size
+            let charge = (acc.data_len() as u64).saturating_mul(params.lamports_per_byte_year);
+            if acc.rent_epoch < current_epoch {
+                let epochs = current_epoch - acc.rent_epoch;
+                let total = charge.saturating_mul(epochs);
+                acc.lamports = acc.lamports.saturating_sub(total);
+                acc.rent_epoch = current_epoch;
+            }
+            acc.lamports > 0 || self.is_rent_exempt(acc, params)
+        });
+    }
+
+    /// Save accounts snapshot to a file
+    pub fn save_accounts_snapshot(&self, path: &str) -> GarpResult<()> {
+        let accounts = self.accounts.read();
+        let serialized = serde_json::to_vec(&*accounts).map_err(|e| GarpError::Internal(e.to_string()))?;
+        std::fs::write(path, serialized).map_err(|e| GarpError::Internal(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Load accounts snapshot from a file
+    pub fn load_accounts_snapshot(&self, path: &str) -> GarpResult<()> {
+        let bytes = std::fs::read(path).map_err(|e| GarpError::Internal(e.to_string()))?;
+        let map: HashMap<AccountId, Account> = serde_json::from_slice(&bytes).map_err(|e| GarpError::Internal(e.to_string()))?;
+        let mut accounts = self.accounts.write();
+        *accounts = map;
+        Ok(())
+    }
+
+    /// Maintain recent blockhash window for anti-replay
+    pub fn record_recent_blockhash(&self, bh: RecentBlockhash) {
+        let mut window = self.recent_blockhashes.write();
+        if window.len() >= 512 { window.remove(0); }
+        window.push(bh);
+    }
+
+    pub fn is_recent_blockhash(&self, bh: &RecentBlockhash) -> bool {
+        self.recent_blockhashes.read().iter().any(|x| x == bh)
+    }
+}
+
+// ----------------------------------------------------------------------------
+// TxV2 validation and simulation
+// ----------------------------------------------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SimulationResult {
+    pub accepted: bool,
+    pub estimated_fee_lamports: u64,
+    pub logs: Vec<String>,
+}
+
+impl LocalLedger {
+    /// Preflight validation: recent blockhash, signatures, account locks, ownership
+    pub async fn preflight_validate_v2(&self, tx: &TxV2) -> GarpResult<bool> {
+        // Recent blockhash check
+        if !self.is_recent_blockhash(&tx.recent_blockhash) && tx.durable_nonce.is_none() {
+            return Ok(false);
+        }
+
+        // Parallel signature verification (GPU-accelerated placeholder)
+        let sig_ok = {
+            let sigs = tx.signatures.clone();
+            let msg = self.create_v2_message(tx)?;
+            let crypto = self.crypto_service.clone();
+            tokio::task::spawn_blocking(move || {
+                sigs.iter().all(|s| crypto.verify_signature(&s.public_key, &msg, &s.signature).unwrap_or(false))
+            })
+            .await
+            .map_err(|e| GarpError::Internal(e.to_string()))?
+        };
+        if !sig_ok { return Ok(false); }
+
+        // Account locks and ownership per instruction
+        for ix in &tx.instructions {
+            self.lock_accounts(&ix.accounts)?;
+            self.enforce_program_ownership(&ix.accounts, &ix.program)?;
+            self.unlock_accounts(&ix.accounts);
+        }
+        Ok(true)
+    }
+
+    /// Simulate transaction execution for fee estimation and DX
+    pub async fn simulate_v2(&self, tx: &TxV2) -> GarpResult<SimulationResult> {
+        let preflight = self.preflight_validate_v2(tx).await?;
+        let mut logs = vec![];
+        let mut estimated_fee = 5000; // base fee
+        if let Some(b) = &tx.compute_budget { estimated_fee += (b.max_units / 10) as u64; }
+        logs.push("Preflight complete".into());
+        Ok(SimulationResult { accepted: preflight, estimated_fee_lamports: estimated_fee, logs })
+    }
+
+    fn create_v2_message(&self, tx: &TxV2) -> GarpResult<Vec<u8>> {
+        let mut msg = Vec::new();
+        msg.extend_from_slice(tx.id.0.as_bytes());
+        msg.extend_from_slice(&tx.recent_blockhash.0);
+        msg.extend_from_slice(&tx.slot.to_le_bytes());
+        // Include fee payer and account list
+        msg.extend_from_slice(tx.fee_payer.0.as_bytes());
+        for a in &tx.account_keys { msg.extend_from_slice(a.0.as_bytes()); }
+        Ok(msg)
+    }
+}
+
 /// Ledger statistics
 #[derive(Debug, Clone)]
 pub struct LedgerStats {
@@ -508,4 +758,34 @@ impl LocalLedger {
             last_transaction_time,
         })
     }
+}
+// -----------------------------------------------------------------------------
+// Deterministic validation rules for blocks and transactions
+// -----------------------------------------------------------------------------
+
+/// Validates block size and aggregate gas usage against configured limits.
+pub fn validate_block_limits(block_bytes: &[u8], tx_gas_costs: &[u64], max_block_size_bytes: usize, max_block_gas: u64) -> Result<(), String> {
+    if block_bytes.len() > max_block_size_bytes {
+        return Err(format!("block size {} exceeds limit {}", block_bytes.len(), max_block_size_bytes));
+    }
+    let total_gas: u64 = tx_gas_costs.iter().copied().sum();
+    if total_gas > max_block_gas {
+        return Err(format!("total gas {} exceeds limit {}", total_gas, max_block_gas));
+    }
+    Ok(())
+}
+
+/// Minimal deterministic transaction correctness checks (placeholder).
+pub fn validate_transaction_basic(tx_bytes: &[u8], max_tx_size_bytes: usize) -> Result<(), String> {
+    if tx_bytes.is_empty() { return Err("empty transaction".into()); }
+    if tx_bytes.len() > max_tx_size_bytes { return Err("transaction too large".into()); }
+    // TODO: verify canonical encoding, signatures, nonces, and fees deterministically.
+    Ok(())
+}
+
+/// Append-only ledger entry for PoH and transactions
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum LedgerEntry {
+    Tick { slot: u64, hash: Vec<u8> },
+    TransactionEntry { slot: u64, tx_id: TransactionId },
 }

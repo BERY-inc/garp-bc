@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>getBlock — GARP JSON-RPC</title>
+  <link rel="stylesheet" href="../styles.css" />
+</head>
+<body>
+  <header class="site-header">
+    <div class="container">
+      <div class="brand">GARP Blockchain</div>
+      <nav class="top-nav">
+        <a href="/">Home</a>
+        <a href="/docs/" class="active">Docs</a>
+        <a href="https://github.com/" target="_blank" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <ul class="nav">
+        <li><a href="../index.html#json-rpc">Back to JSON-RPC</a></li>
+      </ul>
+      <div id="methodToc" class="method-toc"></div>
+    </aside>
+    <section class="content">
+      <article id="getblock">
+        <h1>getBlock</h1>
+        <p>Fetch a block by <code>slot</code> or <code>hash</code>.</p>
+
+        <h2>Request</h2>
+        <div id="req-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "method": "getBlock",
+  "params": { "slot": 12345 },
+  "id": 1
+}</code></pre>
+
+        <h2>Response</h2>
+        <div id="res-schema"></div>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "result": {
+    "slot": 12345,
+    "hash": "9xJ...abc",
+    "parentHash": "7kP...def",
+    "timestamp": 1731000000,
+    "transactions": [
+      {
+        "signature": "5Yk...",
+        "status": "Confirmed",
+        "accounts": ["garp:alice", "garp:bob"],
+        "commands": [{ "type": "transfer", "lamports": 1000 }]
+      }
+    ],
+    "logs": ["program log: ..."],
+    "stateCommitment": "Cmmt...xyz"
+  },
+  "id": 1
+}</code></pre>
+
+        <h2>Error</h2>
+        <pre><code>{
+  "jsonrpc": "2.0",
+  "error": { "code": -32602, "message": "Invalid params" },
+  "id": 1
+}</code></pre>
+
+        <h2>Notes</h2>
+        <ul>
+          <li>Provide either <code>slot</code> or <code>hash</code>; if both provided, <code>slot</code> takes precedence.</li>
+          <li>Field names may evolve as schemas are standardized; use SDK models where possible.</li>
+        </ul>
+      </article>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container">© GARP — Documentation</div>
+  </footer>
+
+  <script>
+    const getBlockRequestSchema = {
+      title: 'params', type: 'object', description: 'Provide either slot or hash',
+      properties: {
+        slot: { type: 'number', description: 'Block slot number' },
+        hash: { type: 'string', description: 'Block hash (base58/hex)' }
+      }
+    };
+    const getBlockResponseSchema = {
+      title: 'result', type: 'object', description: 'Block info',
+      properties: {
+        slot: { type: 'number' },
+        hash: { type: 'string' },
+        parentHash: { type: 'string' },
+        timestamp: { type: 'number' },
+        transactions: {
+          type: 'array', items: {
+            title: 'transaction', type: 'object', properties: {
+              signature: { type: 'string' },
+              status: { type: 'string' },
+              accounts: { type: 'array', items: { type: 'string', title: 'account' } },
+              commands: { type: 'array', items: { type: 'object', title: 'command' } }
+            }
+          }
+        },
+        logs: { type: 'array', items: { type: 'string', title: 'log' } },
+        stateCommitment: { type: 'string' }
+      }
+    };
+    document.addEventListener('DOMContentLoaded', () => {
+      renderSchema(getBlockRequestSchema, document.getElementById('req-schema'));
+      renderSchema(getBlockResponseSchema, document.getElementById('res-schema'));
+    });
+  </script>
+  <script src="../schema.js"></script>
+  <script src="../enhancements.js"></script>
+</body>
+</html>

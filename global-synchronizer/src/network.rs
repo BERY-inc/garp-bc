@@ -12,6 +12,7 @@ use garp_common::{GarpResult, GarpError};
 use garp_common::types::{ParticipantId, DomainId, NodeId};
 
 use crate::config::GlobalSyncConfig;
+use crate::consensus::ConsensusMessage;
 
 /// Network manager for peer-to-peer communication
 pub struct NetworkManager {
@@ -1049,7 +1050,8 @@ pub struct NetworkMetrics {
 impl NetworkManager {
     /// Create new network manager
     pub async fn new(config: Arc<GlobalSyncConfig>) -> GarpResult<Self> {
-        let node_id = NodeId::new(config.node.node_id.clone());
+        // NodeId is a type alias to String
+        let node_id = config.node.node_id.clone();
         let (event_tx, event_rx) = mpsc::unbounded_channel();
         let event_rx = Arc::new(Mutex::new(event_rx));
         
@@ -1174,6 +1176,17 @@ impl NetworkManager {
         let mut handlers = self.message_handlers.write().await;
         handlers.insert(message_type, Box::new(handler));
         Ok(())
+    }
+
+    /// Broadcast a consensus message to validators
+    pub async fn broadcast_consensus_message(&self, message: ConsensusMessage) -> GarpResult<String> {
+        let data = serde_json::to_vec(&message)?;
+        self.send_message(
+            MessageDestination::Validators,
+            "consensus".to_string(),
+            data,
+            MessagePriority::High,
+        ).await
     }
     
     /// Connect to peer

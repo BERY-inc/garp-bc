@@ -1,0 +1,23 @@
+{
+  "name": "@garp/sdk-js",
+  "version": "0.1.0",
+  "description": "JavaScript/TypeScript SDK for GARP participant-node JSON-RPC",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": ""
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}
