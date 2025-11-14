@@ -173,6 +173,64 @@ export class GarpClient {
     }
   }
 
+  // --- Cross-chain Bridge ---
+  async initiateBridgeTransfer(input: {
+    source_chain: string;
+    source_tx_id: string;
+    target_chain: string;
+    amount: number;
+    source_address: string;
+    target_address: string;
+    asset_id: string;
+  }): Promise<{ bridge_tx_id: string }> {
+    if (!this.apiBaseUrl) throw new Error("apiBaseUrl not set: provide opts.apiBaseUrl in GarpClient constructor");
+    
+    const body = {
+      source_chain: input.source_chain,
+      source_tx_id: input.source_tx_id,
+      target_chain: input.target_chain,
+      amount: input.amount,
+      source_address: input.source_address,
+      target_address: input.target_address,
+      asset_id: input.asset_id,
+    };
+    
+    return this.rest(`/bridge/transfer`, { method: "POST", body });
+  }
+
+  async getBridgeTransferStatus(bridgeTxId: string): Promise<string> {
+    if (!this.apiBaseUrl) throw new Error("apiBaseUrl not set: provide opts.apiBaseUrl in GarpClient constructor");
+    
+    const result = await this.rest<{ data: string }>(`/bridge/transfer/${bridgeTxId}/status`);
+    return result.data;
+  }
+
+  async addAssetMapping(input: {
+    source_asset_id: string;
+    source_chain: string;
+    target_asset_id: string;
+    target_chain: string;
+    conversion_rate: number;
+  }): Promise<{ success: boolean; message: string }> {
+    if (!this.apiBaseUrl) throw new Error("apiBaseUrl not set: provide opts.apiBaseUrl in GarpClient constructor");
+    
+    const body = {
+      source_asset_id: input.source_asset_id,
+      source_chain: input.source_chain,
+      target_asset_id: input.target_asset_id,
+      target_chain: input.target_chain,
+      conversion_rate: input.conversion_rate,
+    };
+    
+    return this.rest(`/bridge/assets`, { method: "POST", body });
+  }
+
+  async getAssetMapping(sourceChain: string, sourceAssetId: string, targetChain: string): Promise<any> {
+    if (!this.apiBaseUrl) throw new Error("apiBaseUrl not set: provide opts.apiBaseUrl in GarpClient constructor");
+    
+    return this.rest(`/bridge/assets/${sourceChain}/${sourceAssetId}/${targetChain}`);
+  }
+
   // --- Chat (REST) ---
   async getPublicKey(addressHex: string): Promise<{ address: string; public_key: string }>{
     return this.rest(`/keys/${addressHex}`);

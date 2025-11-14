@@ -1,70 +1,99 @@
 # GARP Blockchain Frontend
 
-This is the frontend interface for the GARP Blockchain Platform.
+This is the web-based frontend interface for the GARP Blockchain Platform. It provides a comprehensive GUI for interacting with the blockchain network.
 
 ## Features
 
-- Blockchain health monitoring
-- Transaction submission
+### Dashboard
+- Network status monitoring
+- Latest block information
+- Account balance checking
+- Network statistics
+
+### Transactions
+- Submit standard transfers
+- View recent transactions
+- Transaction history tracking
+
+### Accounts
 - Account information lookup
-- Latest block information display
+- Balance checking
+- Transaction history by account
+
+### Cross-Chain Bridge
+- Transfer assets between supported blockchains
+- Bridge transaction monitoring
+- Asset mapping management
+
+### Smart Contracts
+- Deploy new contracts
+- Interact with existing contracts
+- List deployed contracts
+
+### Blocks
+- View specific block information
+- Latest block details
+- Recent blocks list
+
+### Chat
+- End-to-end encrypted messaging demo
+- Conversation history
+
+## Development
+
+### Prerequisites
+- Docker and Docker Compose
+- Node.js (for development)
+
+### Running with Docker
+```bash
+# Start all services including the frontend
+docker-compose up -d
+
+# The frontend will be available at http://localhost
+```
+
+### Development Server
+For development, you can run a local development server:
+
+```bash
+# Navigate to the frontend directory
+cd frontend
+
+# Serve the files locally (requires a static file server)
+npx serve
+```
+
+## API Integration
+
+The frontend communicates with several backend services:
+
+1. **Participant Node** (`/node`): Core blockchain operations
+2. **Backend Service** (`/api`): Account and transaction management
+3. **Global Synchronizer** (`/sync`): Cross-domain coordination
+4. **Bridge Service** (`/bridge`): Cross-chain functionality
 
 ## Technologies Used
 
 - HTML5
-- CSS3
-- JavaScript (Vanilla JS)
-- Nginx (for serving static files)
+- CSS3 (with Flexbox and Grid)
+- Vanilla JavaScript (ES6+)
+- Nginx (for serving and proxying)
 
-## API Integration
+## Responsive Design
 
-The frontend communicates with the blockchain backend through the following endpoints:
+The frontend is fully responsive and works on:
+- Desktop computers
+- Tablets
+- Mobile devices
 
-- `/api/health` - Health check
-- `/api/accounts/{address}` - Account information
-- `/api/transactions` - Transaction submission
-- `/api/blocks/latest` - Latest block information
+## Customization
 
-## Deployment
+To customize the frontend:
+1. Modify `index.html` for structure changes
+2. Update `styles.css` for styling
+3. Enhance `app.js` for additional functionality
 
-The frontend is deployed as a Docker container and can be run using:
+## License
 
-```bash
-docker build -t garp-frontend .
-docker run -p 80:80 garp-frontend
-```
-
-Or using the docker-compose.yml file in the root directory:
-
-```bash
-docker-compose up frontend
-```
-
-## Documentation Site
-
-- The documentation is served under the `/docs` path.
-- Files are located at `frontend/docs/` (e.g., `index.html`, `styles.css`, `script.js`).
-- When running via Docker or docker-compose, navigate to `http://localhost/docs/`.
-
-### Local Preview (without Docker)
-
-You can open `frontend/docs/index.html` directly in your browser for a quick preview, or run a simple local server:
-
-```bash
-# PowerShell (Windows)
-cd frontend/docs
-python -m http.server 8088
-# Then open http://localhost:8088/
-```
-
-### Nginx Routing
-
-The Nginx config includes a `/docs/` location block that serves the docs and falls back to `index.html` for nested paths:
-
-```
-location /docs/ {
-  alias /usr/share/nginx/html/docs/;
-  index index.html;
-  try_files $uri $uri/ /docs/index.html;
-}
-```
+This project is part of the GARP Blockchain Platform and is licensed under the MIT License.

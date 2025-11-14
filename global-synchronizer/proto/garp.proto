@@ -1,0 +1,167 @@
+syntax = "proto3";
+
+package garp;
+
+// Global Synchronizer gRPC Service
+service GlobalSynchronizer {
+  // Get node status
+  rpc GetNodeStatus(GetNodeStatusRequest) returns (GetNodeStatusResponse);
+  
+  // Get latest block
+  rpc GetLatestBlock(GetLatestBlockRequest) returns (GetLatestBlockResponse);
+  
+  // Get block by height
+  rpc GetBlockByHeight(GetBlockByHeightRequest) returns (GetBlockByHeightResponse);
+  
+  // Submit transaction
+  rpc SubmitTransaction(SubmitTransactionRequest) returns (SubmitTransactionResponse);
+  
+  // Get transaction status
+  rpc GetTransactionStatus(GetTransactionStatusRequest) returns (GetTransactionStatusResponse);
+  
+  // Initiate cross-chain bridge transfer
+  rpc InitiateBridgeTransfer(InitiateBridgeTransferRequest) returns (InitiateBridgeTransferResponse);
+  
+  // Get bridge transfer status
+  rpc GetBridgeTransferStatus(GetBridgeTransferStatusRequest) returns (GetBridgeTransferStatusResponse);
+  
+  // Add asset mapping
+  rpc AddAssetMapping(AddAssetMappingRequest) returns (AddAssetMappingResponse);
+  
+  // Get asset mapping
+  rpc GetAssetMapping(GetAssetMappingRequest) returns (GetAssetMappingResponse);
+}
+
+// Common types
+message BlockInfo {
+  uint64 height = 1;
+  string hash = 2;
+  string parent_hash = 3;
+  int64 timestamp = 4;
+  repeated TransactionInfo transactions = 5;
+}
+
+message TransactionInfo {
+  string id = 1;
+  string submitter = 2;
+  string status = 3;
+  int64 created_at = 4;
+  string error = 5;
+}
+
+// GetNodeStatus
+message GetNodeStatusRequest {}
+
+message GetNodeStatusResponse {
+  string status = 1;
+  uint64 block_height = 2;
+  string last_block_hash = 3;
+  double tps = 4;
+  double success_rate = 5;
+}
+
+// GetLatestBlock
+message GetLatestBlockRequest {}
+
+message GetLatestBlockResponse {
+  BlockInfo block = 1;
+}
+
+// GetBlockByHeight
+message GetBlockByHeightRequest {
+  uint64 height = 1;
+}
+
+message GetBlockByHeightResponse {
+  BlockInfo block = 1;
+}
+
+// SubmitTransaction
+message SubmitTransactionRequest {
+  bytes transaction_data = 1;
+}
+
+message SubmitTransactionResponse {
+  string transaction_id = 1;
+  string status = 2;
+}
+
+// GetTransactionStatus
+message GetTransactionStatusRequest {
+  string transaction_id = 1;
+}
+
+message GetTransactionStatusResponse {
+  string status = 1;
+  TransactionInfo transaction = 2;
+}
+
+// Bridge transfer types
+message BridgeTransaction {
+  string bridge_tx_id = 1;
+  string source_chain = 2;
+  string source_tx_id = 3;
+  string target_chain = 4;
+  string target_tx_id = 5;
+  uint64 amount = 6;
+  string source_address = 7;
+  string target_address = 8;
+  string status = 9;
+  int64 created_at = 10;
+  int64 updated_at = 11;
+}
+
+// InitiateBridgeTransfer
+message InitiateBridgeTransferRequest {
+  string source_chain = 1;
+  string source_tx_id = 2;
+  string target_chain = 3;
+  uint64 amount = 4;
+  string source_address = 5;
+  string target_address = 6;
+  string asset_id = 7;
+}
+
+message InitiateBridgeTransferResponse {
+  string bridge_tx_id = 1;
+}
+
+// GetBridgeTransferStatus
+message GetBridgeTransferStatusRequest {
+  string bridge_tx_id = 1;
+}
+
+message GetBridgeTransferStatusResponse {
+  string status = 1;
+}
+
+// Asset mapping
+message AssetMapping {
+  string source_asset_id = 1;
+  string source_chain = 2;
+  string target_asset_id = 3;
+  string target_chain = 4;
+  double conversion_rate = 5;
+  int64 last_updated = 6;
+}
+
+// AddAssetMapping
+message AddAssetMappingRequest {
+  AssetMapping mapping = 1;
+}
+
+message AddAssetMappingResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// GetAssetMapping
+message GetAssetMappingRequest {
+  string source_chain = 1;
+  string source_asset_id = 2;
+  string target_chain = 3;
+}
+
+message GetAssetMappingResponse {
+  AssetMapping mapping = 1;
+}

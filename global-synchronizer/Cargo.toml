@@ -5,6 +5,7 @@ edition = "2021"
 authors = ["GARP Team"]
 description = "Global Synchronizer for cross-domain atomic settlement with BFT consensus"
 license = "MIT"
+build = "build.rs"
 
 [dependencies]
 # Common utilities

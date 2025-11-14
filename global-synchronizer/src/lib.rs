@@ -14,14 +14,25 @@ use garp_common::{
     error::{GarpResult, GarpError},
 };
 
-pub mod consensus;
-pub mod cross_domain;
-pub mod settlement;
-pub mod network;
-pub mod storage;
 pub mod api;
-pub mod validator;
+pub mod config;
+pub mod consensus;
 pub mod consensus_example;
+pub mod cross_domain;
+pub mod discovery;
+pub mod network;
+pub mod security;
+pub mod settlement;
+pub mod storage;
+pub mod synchronizer;
+pub mod validator;
+pub mod bridge;
+pub mod grpc;
+
+// Re-export for convenience
+pub use synchronizer::GlobalSynchronizer;
+pub use config::GlobalSyncConfig;
+pub use api::create_router;
 
 use consensus::ConsensusEngine;
 use cross_domain::CrossDomainCoordinator;

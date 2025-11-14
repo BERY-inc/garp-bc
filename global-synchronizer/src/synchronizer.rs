@@ -1,29 +1,32 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{RwLock, Mutex, mpsc, oneshot};
 use tokio::time::interval;
-use uuid::Uuid;
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn, error, debug};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use garp_common::{GarpResult, GarpError};
-use garp_common::types::{TransactionId, ParticipantId};
+use garp_common::types::{TransactionId, Block, ParticipantId};
 
 use crate::config::GlobalSyncConfig;
-use crate::consensus::{ConsensusEngine, ConsensusMessage, ConsensusResult};
-use crate::cross_domain::{CrossDomainCoordinator, CrossDomainTransaction, DomainEvent};
-use crate::settlement::{SettlementEngine, SettlementRequest, SettlementResult};
-use crate::network::{NetworkManager, NetworkEvent};
-use crate::storage::{GlobalStorage, GlobalTransaction, GlobalBlock};
-use crate::metrics::{GlobalSyncMetrics, MetricsCollector};
-use crate::discovery::{DomainDiscovery, DiscoveryEvent};
+use crate::storage::{GlobalStorage, BlockInfo, TransactionInfo, DomainId};
+use crate::network::NetworkManager;
+use crate::consensus::ConsensusEngine;
+use crate::cross_domain::CrossDomainCoordinator;
 use crate::validator::{ValidatorManager, ValidatorInfo};
+use crate::bridge::{CrossChainBridge, BridgeTransaction, BridgeTransactionStatus, AssetMapping, BridgeValidator};
 
-/// Global Synchronizer - Main orchestrator for cross-domain consensus and settlement
+/// Global synchronizer for coordinating cross-domain transactions and state
 pub struct GlobalSynchronizer {
     /// Configuration
     config: Arc<GlobalSyncConfig>,
+    
+    /// Storage layer
+    storage: Arc<GlobalStorage>,
+    
+    /// Network manager
+    network_manager: Arc<NetworkManager>,
     
     /// Consensus engine
     consensus_engine: Arc<ConsensusEngine>,
@@ -31,31 +34,23 @@ pub struct GlobalSynchronizer {
     /// Cross-domain coordinator
     cross_domain_coordinator: Arc<CrossDomainCoordinator>,
     
-    /// Settlement engine
-    settlement_engine: Arc<SettlementEngine>,
-    
-    /// Network manager
-    network_manager: Arc<NetworkManager>,
-    
-    /// Storage layer
-    storage: Arc<GlobalStorage>,
-    
-    /// Domain discovery
-    domain_discovery: Arc<DomainDiscovery>,
-    
     /// Validator manager
     validator_manager: Arc<ValidatorManager>,
     
-    /// Metrics collector
-    metrics: Arc<GlobalSyncMetrics>,
+    /// Cross-chain bridge
+    bridge: Arc<CrossChainBridge>,
     
     /// Active transactions
     active_transactions: Arc<RwLock<HashMap<TransactionId, ActiveTransaction>>>,
-    /// Mempool of pending transaction IDs
-    mempool: Arc<RwLock<Vec<TransactionId>>>,
     
     /// Pending blocks
     pending_blocks: Arc<RwLock<HashMap<String, PendingBlock>>>,
+    
+    /// Metrics
+    metrics: Arc<GlobalSyncMetrics>,
+    
+    /// State
+    state: Arc<RwLock<GlobalSyncState>>,
     
     /// Event channels
     event_tx: mpsc::UnboundedSender<GlobalSyncEvent>,
@@ -63,9 +58,6 @@ pub struct GlobalSynchronizer {
     
     /// Shutdown signal
     shutdown_tx: Option<oneshot::Sender<()>>,
-    
-    /// Current state
-    state: Arc<RwLock<GlobalSyncState>>,
 }
 
 /// Active transaction in the global synchronizer
@@ -301,71 +293,57 @@ pub enum GlobalSyncEvent {
 
 impl GlobalSynchronizer {
     /// Create new global synchronizer
-    pub async fn new(
-        config: GlobalSyncConfig,
-        storage: Arc<GlobalStorage>,
-    ) -> GarpResult<Self> {
+    pub async fn new(config: GlobalSyncConfig) -> GarpResult<Self> {
         let config = Arc::new(config);
         
-        // Initialize components
+        // Initialize storage
+        let storage = Arc::new(GlobalStorage::new(config.clone()).await?);
+        
+        // Initialize network manager
         let network_manager = Arc::new(NetworkManager::new(config.clone()).await?);
+        
+        // Initialize consensus engine
         let consensus_engine = Arc::new(ConsensusEngine::new(config.clone()).await?);
-        let domain_discovery = Arc::new(DomainDiscovery::new(config.clone()).await?);
-        let settlement_engine = Arc::new(SettlementEngine::new(
-            config.clone(),
-            storage.clone(),
-            network_manager.clone(),
-            consensus_engine.clone(),
-        ).await?);
+        
+        // Initialize cross-domain coordinator
         let cross_domain_coordinator = Arc::new(CrossDomainCoordinator::new(
             config.clone(),
             storage.clone(),
             network_manager.clone(),
-            domain_discovery.clone(),
             consensus_engine.clone(),
         ).await?);
+        
+        // Initialize validator manager
         let validator_manager = Arc::new(ValidatorManager::new(config.clone()).await?);
-        let metrics = Arc::new(GlobalSyncMetrics::new());
         
-        // Create event channel
+        // Initialize cross-chain bridge
+        let bridge = Arc::new(CrossChainBridge::new(
+            config.clone(),
+            storage.clone(),
+            network_manager.clone(),
+        ).await?);
+        
+        // Create event channels
         let (event_tx, event_rx) = mpsc::unbounded_channel();
-        let event_rx = Arc::new(Mutex::new(event_rx));
         
-        // Initialize state
-        let state = Arc::new(RwLock::new(GlobalSyncState {
-            status: SyncStatus::Starting,
-            block_height: 0,
-            last_block_hash: String::new(),
-            active_validators: Vec::new(),
-            connected_domains: Vec::new(),
-            performance_metrics: PerformanceMetrics {
-                tps: 0.0,
-                avg_consensus_time_ms: 0.0,
-                avg_settlement_time_ms: 0.0,
-                success_rate: 0.0,
-                network_latency_ms: 0.0,
-            },
-            last_updated: Instant::now(),
-        }));
-        
-        Ok(Self {
+        let synchronizer = Self {
             config,
+            storage,
+            network_manager,
             consensus_engine,
             cross_domain_coordinator,
-            settlement_engine,
-            network_manager,
-            storage,
-            domain_discovery,
             validator_manager,
-            metrics,
+            bridge,
             active_transactions: Arc::new(RwLock::new(HashMap::new())),
-            mempool: Arc::new(RwLock::new(Vec::new())),
             pending_blocks: Arc::new(RwLock::new(HashMap::new())),
+            metrics: Arc::new(GlobalSyncMetrics::default()),
+            state: Arc::new(RwLock::new(GlobalSyncState::default())),
             event_tx,
-            event_rx,
+            event_rx: Arc::new(Mutex::new(event_rx)),
             shutdown_tx: None,
-            state,
-        })
+        };
+        
+        Ok(synchronizer)
     }
     
     /// Start the global synchronizer
@@ -382,10 +360,9 @@ impl GlobalSynchronizer {
         // Start components
         self.consensus_engine.start().await?;
         self.cross_domain_coordinator.start().await?;
-        self.settlement_engine.start().await?;
         self.network_manager.start().await?;
-        self.domain_discovery.start().await?;
         self.validator_manager.start().await?;
+        self.bridge.start().await?;
         
         // Start event processing
         let event_processor = self.start_event_processor().await?;
@@ -424,10 +401,9 @@ impl GlobalSynchronizer {
         }
         
         // Stop components
+        self.bridge.stop().await?;
         self.validator_manager.stop().await?;
-        self.domain_discovery.stop().await?;
         self.network_manager.stop().await?;
-        self.settlement_engine.stop().await?;
         self.cross_domain_coordinator.stop().await?;
         self.consensus_engine.stop().await?;
         
@@ -921,6 +897,59 @@ impl GlobalSynchronizer {
         });
         
         Ok(handle)
+    }
+    
+    /// Initiate a cross-chain bridge transfer
+    pub async fn initiate_bridge_transfer(
+        &self,
+        source_chain: String,
+        source_tx_id: String,
+        target_chain: String,
+        amount: u64,
+        source_address: String,
+        target_address: String,
+        asset_id: String,
+    ) -> GarpResult<String> {
+        self.bridge.initiate_asset_transfer(
+            source_chain,
+            source_tx_id,
+            target_chain,
+            amount,
+            source_address,
+            target_address,
+            asset_id,
+        ).await
+    }
+    
+    /// Get bridge transaction
+    pub async fn get_bridge_transaction(&self, bridge_tx_id: &str) -> GarpResult<Option<BridgeTransaction>> {
+        let transactions = self.bridge.bridge_transactions.read().await;
+        Ok(transactions.get(bridge_tx_id).cloned())
+    }
+    
+    /// Get bridge transaction status
+    pub async fn get_bridge_transaction_status(&self, bridge_tx_id: &str) -> GarpResult<BridgeTransactionStatus> {
+        self.bridge.get_bridge_transaction_status(bridge_tx_id).await
+    }
+    
+    /// Add asset mapping
+    pub async fn add_asset_mapping(&self, mapping: AssetMapping) -> GarpResult<()> {
+        self.bridge.add_asset_mapping(mapping).await
+    }
+    
+    /// Get asset mapping
+    pub async fn get_asset_mapping(&self, source_chain: &str, source_asset_id: &str, target_chain: &str) -> GarpResult<Option<AssetMapping>> {
+        self.bridge.get_asset_mapping(source_chain, source_asset_id, target_chain).await
+    }
+    
+    /// Add bridge validator
+    pub async fn add_bridge_validator(&self, validator: BridgeValidator) -> GarpResult<()> {
+        self.bridge.add_validator(validator).await
+    }
+    
+    /// Get bridge validator
+    pub async fn get_bridge_validator(&self, validator_id: &str) -> GarpResult<Option<BridgeValidator>> {
+        self.bridge.get_validator(validator_id).await
     }
 }
 

@@ -1,156 +1,201 @@
-from __future__ import annotations
-
 import json
+import requests
+from typing import Optional, Dict, Any, Union
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Type, TypeVar
-
-import httpx
-
-
-class RpcError(Exception):
-    def __init__(self, code: int, message: str):
-        self.code = code
-        self.message = message
-        super().__init__(f"RPC error {code}: {message}")
-
-
-T = TypeVar("T")
-
+from .types import BlockInfo, TransactionInfo
 
 @dataclass
 class SimulationResult:
     ok: bool
-    logs: Optional[list[str]] = None
+    logs: Optional[list] = None
     error: Optional[str] = None
-
-
-def _from_dict(cls: Type[T], data: Dict[str, Any]) -> T:
-    # Simple dataclass conversion without 3rd-party libs
-    return cls(**data)
-
 
 class GarpClient:
     def __init__(self, base_url: str, timeout: float = 10.0):
-        self.base_url = base_url.rstrip("/")
-        self.client = httpx.Client(timeout=timeout)
-        self._id = 1
-
-    def _rpc(self, method: str, params: Optional[Any] = None) -> Any:
-        body = {"jsonrpc": "2.0", "id": self._id, "method": method}
-        self._id += 1
-        if params is not None:
-            body["params"] = params
-        resp = self.client.post(f"{self.base_url}/rpc", json=body)
-        data = resp.json()
-        if "error" in data:
-            raise RpcError(data["error"]["code"], data["error"]["message"])
-        return data["result"]
-
+        self.base_url = base_url.rstrip('/')
+        self.timeout = timeout
+        self.session = requests.Session()
+        
+    def _rpc(self, method: str, params: Optional[list] = None) -> Any:
+        """Make an RPC call to the GARP node."""
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": method,
+            "params": params or []
+        }
+        
+        response = self.session.post(
+            f"{self.base_url}/rpc",
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        if "error" in result:
+            raise Exception(f"RPC error: {result['error']}")
+            
+        return result.get("result")
+    
     # Timing & consensus
     def get_slot(self) -> int:
         return self._rpc("getSlot")
-
+    
     def get_slot_leader(self) -> str:
         return self._rpc("getSlotLeader")
-
+    
     # Blocks
-    def get_block_by_slot(self, slot: int) -> Optional[Dict[str, Any]]:
-        return self._rpc("getBlock", [slot])
-
-    def get_block_by_hash(self, hash_hex: str) -> Optional[Dict[str, Any]]:
-        return self._rpc("getBlock", [hash_hex])
-
+    def get_block_by_slot(self, slot: int) -> Optional[BlockInfo]:
+        result = self._rpc("getBlock", [slot])
+        if result is None:
+            return None
+        return BlockInfo(**result)
+    
+    def get_block_by_hash(self, hash_hex: str) -> Optional[BlockInfo]:
+        result = self._rpc("getBlock", [hash_hex])
+        if result is None:
+            return None
+        return BlockInfo(**result)
+    
     # Transactions
-    def get_transaction(self, tx_id_hex: str) -> Optional[Dict[str, Any]]:
-        return self._rpc("getTransaction", [tx_id_hex])
-
-    def send_transaction_raw(self, serialized: str) -> str:
-        return self._rpc("sendTransaction", [serialized])
-
-    def simulate_transaction_raw(self, serialized: str) -> SimulationResult:
-        res = self._rpc("simulateTransaction", [serialized])
-        return _from_dict(SimulationResult, res)
-
+    def get_transaction(self, tx_id_hex: str) -> Optional[TransactionInfo]:
+        result = self._rpc("getTransaction", [tx_id_hex])
+        if result is None:
+            return None
+        return TransactionInfo(**result)
+    
+    def send_transaction_raw(self, tx_serialized: str) -> str:
+        return self._rpc("sendTransaction", [tx_serialized])
+    
+    def simulate_transaction_raw(self, tx_serialized: str) -> SimulationResult:
+        result = self._rpc("simulateTransaction", [tx_serialized])
+        return SimulationResult(**result)
+    
     # Wallets
-    def get_balance(self, address_hex: str) -> Any:
-        # Balance may be bigint; return raw JSON value
+    def get_balance(self, address_hex: str) -> Union[str, int]:
         return self._rpc("getBalance", [address_hex])
-
+    
     # Node info
     def get_version(self) -> str:
         return self._rpc("getVersion")
-
+    
     def get_health(self) -> str:
         return self._rpc("getHealth")
-
-    def close(self) -> None:
-        self.client.close()
-
-    def __enter__(self) -> "GarpClient":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
-
-
-class AsyncGarpClient:
-    def __init__(self, base_url: str, timeout: float = 10.0):
-        self.base_url = base_url.rstrip("/")
-        self.client = httpx.AsyncClient(timeout=timeout)
-        self._id = 1
-
-    async def _rpc(self, method: str, params: Optional[Any] = None) -> Any:
-        body = {"jsonrpc": "2.0", "id": self._id, "method": method}
-        self._id += 1
-        if params is not None:
-            body["params"] = params
-        resp = await self.client.post(f"{self.base_url}/rpc", json=body)
-        data = resp.json()
-        if "error" in data:
-            raise RpcError(data["error"]["code"], data["error"]["message"])
-        return data["result"]
-
-    # Timing & consensus
-    async def get_slot(self) -> int:
-        return await self._rpc("getSlot")
-
-    async def get_slot_leader(self) -> str:
-        return await self._rpc("getSlotLeader")
-
-    # Blocks
-    async def get_block_by_slot(self, slot: int) -> Optional[Dict[str, Any]]:
-        return await self._rpc("getBlock", [slot])
-
-    async def get_block_by_hash(self, hash_hex: str) -> Optional[Dict[str, Any]]:
-        return await self._rpc("getBlock", [hash_hex])
-
-    # Transactions
-    async def get_transaction(self, tx_id_hex: str) -> Optional[Dict[str, Any]]:
-        return await self._rpc("getTransaction", [tx_id_hex])
-
-    async def send_transaction_raw(self, serialized: str) -> str:
-        return await self._rpc("sendTransaction", [serialized])
-
-    async def simulate_transaction_raw(self, serialized: str) -> SimulationResult:
-        res = await self._rpc("simulateTransaction", [serialized])
-        return _from_dict(SimulationResult, res)
-
-    # Wallets
-    async def get_balance(self, address_hex: str) -> Any:
-        return await self._rpc("getBalance", [address_hex])
-
-    # Node info
-    async def get_version(self) -> str:
-        return await self._rpc("getVersion")
-
-    async def get_health(self) -> str:
-        return await self._rpc("getHealth")
-
-    async def aclose(self) -> None:
-        await self.client.aclose()
-
-    async def __aenter__(self) -> "AsyncGarpClient":
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb) -> None:
-        await self.aclose()
+    
+    # Cross-chain bridge functionality
+    def initiate_bridge_transfer(
+        self, 
+        source_chain: str,
+        source_tx_id: str,
+        target_chain: str,
+        amount: int,
+        source_address: str,
+        target_address: str,
+        asset_id: str
+    ) -> str:
+        """Initiate a cross-chain asset transfer."""
+        payload = {
+            "source_chain": source_chain,
+            "source_tx_id": source_tx_id,
+            "target_chain": target_chain,
+            "amount": amount,
+            "source_address": source_address,
+            "target_address": target_address,
+            "asset_id": asset_id
+        }
+        
+        response = self.session.post(
+            f"{self.base_url}/api/v1/bridge/transfer",
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        if not result.get("success"):
+            raise Exception(f"Bridge transfer failed: {result.get('error')}")
+            
+        return result["data"]["bridge_tx_id"]
+    
+    def get_bridge_transfer_status(self, bridge_tx_id: str) -> str:
+        """Get the status of a bridge transfer."""
+        response = self.session.get(
+            f"{self.base_url}/api/v1/bridge/transfer/{bridge_tx_id}/status",
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        if not result.get("success"):
+            raise Exception(f"Failed to get bridge transfer status: {result.get('error')}")
+            
+        return result["data"]
+    
+    def add_asset_mapping(
+        self,
+        source_asset_id: str,
+        source_chain: str,
+        target_asset_id: str,
+        target_chain: str,
+        conversion_rate: float
+    ) -> bool:
+        """Add an asset mapping between chains."""
+        payload = {
+            "source_asset_id": source_asset_id,
+            "source_chain": source_chain,
+            "target_asset_id": target_asset_id,
+            "target_chain": target_chain,
+            "conversion_rate": conversion_rate
+        }
+        
+        response = self.session.post(
+            f"{self.base_url}/api/v1/bridge/assets",
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        return result.get("success", False)
+    
+    def get_asset_mapping(
+        self,
+        source_chain: str,
+        source_asset_id: str,
+        target_chain: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get an asset mapping between chains."""
+        response = self.session.get(
+            f"{self.base_url}/api/v1/bridge/assets/{source_chain}/{source_asset_id}/{target_chain}",
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        if not result.get("success"):
+            return None
+            
+        return result["data"]
+    
+    # Batch requests
+    def batch(self, calls: list) -> list:
+        """Execute multiple RPC calls in a batch."""
+        payload = []
+        for i, call in enumerate(calls):
+            payload.append({
+                "jsonrpc": "2.0",
+                "id": i + 1,
+                "method": call["method"],
+                "params": call.get("params", [])
+            })
+        
+        response = self.session.post(
+            f"{self.base_url}/rpc",
+            json=payload,
+            timeout=self.timeout
+        )
+        response.raise_for_status()
+        
+        results = response.json()
+        return [r.get("result") for r in results]

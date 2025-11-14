@@ -258,3 +258,162 @@ func (c *Client) GetHealthCtx(ctx context.Context) (string, error) {
     err := c.rpcCtx(ctx, "getHealth", nil, &s)
     return s, err
 }
+
+// Cross-chain bridge functionality
+type BridgeTransferRequest struct {
+    SourceChain   string `json:"source_chain"`
+    SourceTxID    string `json:"source_tx_id"`
+    TargetChain   string `json:"target_chain"`
+    Amount        int64  `json:"amount"`
+    SourceAddress string `json:"source_address"`
+    TargetAddress string `json:"target_address"`
+    AssetID       string `json:"asset_id"`
+}
+
+type BridgeTransferResponse struct {
+    Success bool   `json:"success"`
+    Data    struct {
+        BridgeTxID string `json:"bridge_tx_id"`
+    } `json:"data"`
+    Error *string `json:"error,omitempty"`
+}
+
+type BridgeTransferStatusResponse struct {
+    Success bool   `json:"success"`
+    Data    string `json:"data"`
+    Error   *string `json:"error,omitempty"`
+}
+
+type AssetMappingRequest struct {
+    SourceAssetID  string  `json:"source_asset_id"`
+    SourceChain    string  `json:"source_chain"`
+    TargetAssetID  string  `json:"target_asset_id"`
+    TargetChain    string  `json:"target_chain"`
+    ConversionRate float64 `json:"conversion_rate"`
+}
+
+type AssetMappingResponse struct {
+    Success bool        `json:"success"`
+    Data    interface{} `json:"data"`
+    Error   *string     `json:"error,omitempty"`
+}
+
+// InitiateBridgeTransfer initiates a cross-chain asset transfer
+func (c *Client) InitiateBridgeTransfer(req BridgeTransferRequest) (string, error) {
+    body, err := json.Marshal(req)
+    if err != nil {
+        return "", err
+    }
+
+    httpReq, err := http.NewRequest("POST", c.BaseURL+"/api/v1/bridge/transfer", bytes.NewReader(body))
+    if err != nil {
+        return "", err
+    }
+    httpReq.Header.Set("content-type", "application/json")
+
+    resp, err := c.HTTP.Do(httpReq)
+    if err != nil {
+        return "", err
+    }
+    defer resp.Body.Close()
+
+    var result BridgeTransferResponse
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return "", err
+    }
+
+    if !result.Success {
+        if result.Error != nil {
+            return "", errors.New(*result.Error)
+        }
+        return "", errors.New("bridge transfer failed")
+    }
+
+    return result.Data.BridgeTxID, nil
+}
+
+// GetBridgeTransferStatus gets the status of a bridge transfer
+func (c *Client) GetBridgeTransferStatus(bridgeTxID string) (string, error) {
+    url := fmt.Sprintf("%s/api/v1/bridge/transfer/%s/status", c.BaseURL, bridgeTxID)
+    resp, err := c.HTTP.Get(url)
+    if err != nil {
+        return "", err
+    }
+    defer resp.Body.Close()
+
+    var result BridgeTransferStatusResponse
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return "", err
+    }
+
+    if !result.Success {
+        if result.Error != nil {
+            return "", errors.New(*result.Error)
+        }
+        return "", errors.New("failed to get bridge transfer status")
+    }
+
+    return result.Data, nil
+}
+
+// AddAssetMapping adds an asset mapping between chains
+func (c *Client) AddAssetMapping(req AssetMappingRequest) (bool, error) {
+    body, err := json.Marshal(req)
+    if err != nil {
+        return false, err
+    }
+
+    httpReq, err := http.NewRequest("POST", c.BaseURL+"/api/v1/bridge/assets", bytes.NewReader(body))
+    if err != nil {
+        return false, err
+    }
+    httpReq.Header.Set("content-type", "application/json")
+
+    resp, err := c.HTTP.Do(httpReq)
+    if err != nil {
+        return false, err
+    }
+    defer resp.Body.Close()
+
+    var result struct {
+        Success bool   `json:"success"`
+        Message string `json:"message"`
+        Error   *string `json:"error,omitempty"`
+    }
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return false, err
+    }
+
+    if !result.Success {
+        if result.Error != nil {
+            return false, errors.New(*result.Error)
+        }
+        return false, errors.New(result.Message)
+    }
+
+    return true, nil
+}
+
+// GetAssetMapping gets an asset mapping between chains
+func (c *Client) GetAssetMapping(sourceChain, sourceAssetID, targetChain string) (interface{}, error) {
+    url := fmt.Sprintf("%s/api/v1/bridge/assets/%s/%s/%s", c.BaseURL, sourceChain, sourceAssetID, targetChain)
+    resp, err := c.HTTP.Get(url)
+    if err != nil {
+        return nil, err
+    }
+    defer resp.Body.Close()
+
+    var result AssetMappingResponse
+    if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+        return nil, err
+    }
+
+    if !result.Success {
+        if result.Error != nil {
+            return nil, errors.New(*result.Error)
+        }
+        return nil, errors.New("failed to get asset mapping")
+    }
+
+    return result.Data, nil
+}

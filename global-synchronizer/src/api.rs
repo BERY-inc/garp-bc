@@ -1,11 +1,12 @@
 use axum::{routing::{get, post}, extract::{Path, Json as AxumJson}, response::Json, Router};
 use axum::middleware;
 use std::sync::Arc;
-use serde::Serialize;
+use serde::{Serialize, Deserialize};
 use serde_json::Value as JsonValue;
 use crate::{GlobalSynchronizer, storage::BlockInfo};
 use crate::cross_domain::CrossDomainTransaction;
 use crate::validator::{ValidatorInfo, ValidatorStatus};
+use crate::bridge::{BridgeTransaction, BridgeTransactionStatus, AssetMapping, BridgeValidator};
 use garp_common::types::TransactionId;
 use uuid::Uuid;
 use hex;
@@ -29,16 +30,24 @@ pub fn create_router(sync: Arc<GlobalSynchronizer>) -> Router {
         .route("/metrics", get(prometheus_metrics_handler(sync.clone())))
         .route("/api/v1/blocks/latest", get(latest_block_handler(sync.clone())))
         .route("/api/v1/blocks/:height", get(block_by_height_handler(sync.clone())))
-        .route("/api/v1/blocks/:height/details", get(block_details_handler(sync)))
+        .route("/api/v1/blocks/:height/details", get(block_details_handler(sync.clone())))
         .route("/api/v1/blocks/:height/transactions", get(block_transactions_handler(sync.clone())))
         .route("/api/v1/mempool", get(mempool_handler(sync.clone())))
         .route("/api/v1/transactions/:id/status", get(tx_status_handler(sync.clone())))
         .route("/api/v1/transactions/:id/details", get(tx_details_handler(sync.clone())))
-        .route("/api/v1/transactions", post(submit_transaction_handler(sync)))
+        .route("/api/v1/transactions", post(submit_transaction_handler(sync.clone())))
         .route("/api/v1/transactions/signed", post(submit_signed_transaction_handler(sync.clone())))
         .route("/api/v1/validators", get(validators_list_handler(sync.clone())).post(validators_add_handler(sync.clone())))
         .route("/api/v1/validators/:id", axum::routing::delete(validators_remove_handler(sync.clone())))
         .route("/api/v1/validators/:id/status", axum::routing::patch(validators_update_status_handler(sync.clone())))
+        // Bridge endpoints
+        .route("/api/v1/bridge/transfer", post(initiate_bridge_transfer_handler(sync.clone())))
+        .route("/api/v1/bridge/transfer/:id", get(get_bridge_transfer_handler(sync.clone())))
+        .route("/api/v1/bridge/transfer/:id/status", get(get_bridge_transfer_status_handler(sync.clone())))
+        .route("/api/v1/bridge/assets", post(add_asset_mapping_handler(sync.clone())))
+        .route("/api/v1/bridge/assets/:source_chain/:source_asset/:target_chain", get(get_asset_mapping_handler(sync.clone())))
+        .route("/api/v1/bridge/validators", post(add_validator_handler(sync.clone())))
+        .route("/api/v1/bridge/validators/:id", get(get_validator_handler(sync.clone())))
         // Security: simple bearer token auth and concurrency limits
         .layer(middleware::from_fn(auth_middleware))
         .layer(tower::limit::ConcurrencyLimitLayer::new(64))
@@ -496,6 +505,201 @@ fn tx_details_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Hand
         }
     })
 }
+
+// Bridge API handlers
+#[derive(Deserialize)]
+struct InitiateBridgeTransferRequest {
+    source_chain: String,
+    source_tx_id: String,
+    target_chain: String,
+    amount: u64,
+    source_address: String,
+    target_address: String,
+    asset_id: String,
+}
+
+#[derive(Serialize)]
+struct InitiateBridgeTransferResponse {
+    bridge_tx_id: String,
+}
+
+fn initiate_bridge_transfer_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(), axum::body::Body> {
+    axum::routing::post(move |AxumJson(request): AxumJson<InitiateBridgeTransferRequest>| {
+        let sync = sync.clone();
+        async move {
+            match sync.initiate_bridge_transfer(
+                request.source_chain,
+                request.source_tx_id,
+                request.target_chain,
+                request.amount,
+                request.source_address,
+                request.target_address,
+                request.asset_id,
+            ).await {
+                Ok(bridge_tx_id) => {
+                    let response = InitiateBridgeTransferResponse { bridge_tx_id };
+                    Json(ApiResponse { success: true, data: Some(response), error: None })
+                }
+                Err(e) => Json(ApiResponse::<serde_json::Value> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+#[derive(Serialize)]
+struct BridgeTransferDto {
+    bridge_tx_id: String,
+    source_chain: String,
+    source_tx_id: String,
+    target_chain: String,
+    target_tx_id: Option<String>,
+    amount: u64,
+    source_address: String,
+    target_address: String,
+    status: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+    updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn get_bridge_transfer_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(Path<String>,), axum::body::Body> {
+    axum::routing::get(move |Path(bridge_tx_id): Path<String>| {
+        let sync = sync.clone();
+        async move {
+            match sync.get_bridge_transaction(&bridge_tx_id).await {
+                Ok(Some(bridge_tx)) => {
+                    let dto = BridgeTransferDto {
+                        bridge_tx_id: bridge_tx.bridge_tx_id,
+                        source_chain: bridge_tx.source_chain,
+                        source_tx_id: bridge_tx.source_tx_id,
+                        target_chain: bridge_tx.target_chain,
+                        target_tx_id: bridge_tx.target_tx_id,
+                        amount: match &bridge_tx.bridge_type {
+                            crate::bridge::BridgeTransactionType::AssetTransfer { .. } => bridge_tx.amount,
+                            _ => 0,
+                        },
+                        source_address: bridge_tx.source_address,
+                        target_address: bridge_tx.target_address,
+                        status: format!("{:?}", bridge_tx.status),
+                        created_at: bridge_tx.created_at,
+                        updated_at: bridge_tx.updated_at,
+                    };
+                    Json(ApiResponse { success: true, data: Some(dto), error: None })
+                }
+                Ok(None) => Json(ApiResponse::<BridgeTransferDto> { success: false, data: None, error: Some("Bridge transaction not found".into()) }),
+                Err(e) => Json(ApiResponse::<BridgeTransferDto> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+fn get_bridge_transfer_status_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(Path<String>,), axum::body::Body> {
+    axum::routing::get(move |Path(bridge_tx_id): Path<String>| {
+        let sync = sync.clone();
+        async move {
+            match sync.get_bridge_transaction_status(&bridge_tx_id).await {
+                Ok(status) => {
+                    let status_str = format!("{:?}", status);
+                    Json(ApiResponse { success: true, data: Some(status_str), error: None })
+                }
+                Err(e) => Json(ApiResponse::<String> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+#[derive(Deserialize)]
+struct AddAssetMappingRequest {
+    source_asset_id: String,
+    source_chain: String,
+    target_asset_id: String,
+    target_chain: String,
+    conversion_rate: f64,
+}
+
+fn add_asset_mapping_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(), axum::body::Body> {
+    axum::routing::post(move |AxumJson(request): AxumJson<AddAssetMappingRequest>| {
+        let sync = sync.clone();
+        async move {
+            let mapping = AssetMapping {
+                source_asset_id: request.source_asset_id,
+                source_chain: request.source_chain,
+                target_asset_id: request.target_asset_id,
+                target_chain: request.target_chain,
+                conversion_rate: request.conversion_rate,
+                last_updated: Utc::now(),
+            };
+            
+            match sync.add_asset_mapping(mapping).await {
+                Ok(()) => Json(ApiResponse { success: true, data: Some("Asset mapping added successfully".to_string()), error: None }),
+                Err(e) => Json(ApiResponse::<String> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+fn get_asset_mapping_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(Path<(String, String, String)>,), axum::body::Body> {
+    axum::routing::get(move |Path((source_chain, source_asset_id, target_chain)): Path<(String, String, String)>| {
+        let sync = sync.clone();
+        async move {
+            match sync.get_asset_mapping(&source_chain, &source_asset_id, &target_chain).await {
+                Ok(Some(mapping)) => Json(ApiResponse { success: true, data: Some(mapping), error: None }),
+                Ok(None) => Json(ApiResponse::<AssetMapping> { success: false, data: None, error: Some("Asset mapping not found".into()) }),
+                Err(e) => Json(ApiResponse::<AssetMapping> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+#[derive(Deserialize)]
+struct AddValidatorRequest {
+    validator_id: String,
+    supported_chains: Vec<String>,
+    public_key: String,
+    status: String,
+    reputation: u64,
+}
+
+fn add_validator_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(), axum::body::Body> {
+    axum::routing::post(move |AxumJson(request): AxumJson<AddValidatorRequest>| {
+        let sync = sync.clone();
+        async move {
+            let status = match request.status.as_str() {
+                "Active" => crate::bridge::ValidatorStatus::Active,
+                "Inactive" => crate::bridge::ValidatorStatus::Inactive,
+                "Slashed" => crate::bridge::ValidatorStatus::Slashed,
+                _ => crate::bridge::ValidatorStatus::Inactive,
+            };
+            
+            let validator = BridgeValidator {
+                validator_id: request.validator_id,
+                supported_chains: request.supported_chains.into_iter().collect(),
+                public_key: request.public_key,
+                status,
+                reputation: request.reputation,
+                last_seen: Utc::now(),
+            };
+            
+            match sync.add_bridge_validator(validator).await {
+                Ok(()) => Json(ApiResponse { success: true, data: Some("Validator added successfully".to_string()), error: None }),
+                Err(e) => Json(ApiResponse::<String> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
+fn get_validator_handler(sync: Arc<GlobalSynchronizer>) -> impl axum::handler::Handler<(Path<String>,), axum::body::Body> {
+    axum::routing::get(move |Path(validator_id): Path<String>| {
+        let sync = sync.clone();
+        async move {
+            match sync.get_bridge_validator(&validator_id).await {
+                Ok(Some(validator)) => Json(ApiResponse { success: true, data: Some(validator), error: None }),
+                Ok(None) => Json(ApiResponse::<BridgeValidator> { success: false, data: None, error: Some("Validator not found".into()) }),
+                Err(e) => Json(ApiResponse::<BridgeValidator> { success: false, data: None, error: Some(format!("{}", e)) }),
+            }
+        }
+    })
+}
+
 async fn auth_middleware<B>(req: axum::http::Request<B>, next: middleware::Next<B>) -> Result<axum::response::Response, axum::http::StatusCode> {
     // Per-IP throttle (simple in-memory)
     static IP_THROTTLE: OnceLock<Mutex<HashMap<String, (u32, i64)>>> = OnceLock::new();

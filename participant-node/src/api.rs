@@ -30,6 +30,7 @@ use garp_common::{
 use crate::{
     node::ParticipantNode,
     config::ApiConfig,
+    eth_compatibility::EthCompatibilityLayer,
 };
 use crate::merkle::{merkle_proof, merkle_root, MerkleProof};
 
@@ -297,9 +298,13 @@ impl ApiServer {
 
     /// Create router with all endpoints
     pub fn create_router(&self) -> Router {
-    Router::new()
+        let eth_layer = EthCompatibilityLayer::new(self.node.clone());
+        
+        Router::new()
             // JSON-RPC
             .route("/rpc", post(json_rpc))
+            // Ethereum compatibility JSON-RPC
+            .route("/eth", post(eth_json_rpc))
             // Transaction endpoints
             .route("/api/v1/transactions", post(submit_transaction))
             .route("/api/v1/transactions", get(list_transactions))
