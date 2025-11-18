@@ -5,7 +5,6 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 use chrono::{DateTime, Utc};
 use async_trait::async_trait;
-use crate::types::{BlockHeader, Block};
 use std::sync::Arc;
 
 /// Consensus proposal for transaction validation

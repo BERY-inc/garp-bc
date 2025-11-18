@@ -39,6 +39,12 @@ API
 - Validators: `GET /api/v1/validators`, `POST /api/v1/validators`, `DELETE /api/v1/validators/:id`, `PATCH /api/v1/validators/:id/status`
 - Auth: set `SYNC_API_TOKEN` to enforce bearer token validation.
 
+Testing
+- Unit tests: `cargo test`
+- Bridge-specific tests: `cargo test bridge`
+- Integration tests are located in the `tests/` directory
+- Comprehensive test coverage for wallet management, liquidity pools, price oracles, and cross-chain connectors
+
 Operational Notes
 - Configure logging level via `--log-level` or `monitoring.logging.level`.
 - Enable metrics collection via `--enable-metrics`; scrape `GET /metrics` with Prometheus.

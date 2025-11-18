@@ -46,8 +46,9 @@ tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
 hyper = { version = "1.0", features = ["full"] }
 tonic = { version = "0.11", features = ["tls"] }
 prost = "0.12"
-hex = "0.4"
+hex = { version = "0.4", features = ["alloc"] }
 blake3 = "1.5"
+reqwest = { version = "0.11", features = ["json"] }
 
 # Database
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
@@ -74,6 +75,8 @@ metrics-prometheus = "0.6"
 ring = "0.17"
 ed25519-dalek = { version = "2.0", features = ["serde"] }
 sha2 = "0.10"
+sha3 = "0.10"
+secp256k1 = "0.28"
 
 # Network discovery
 libp2p = { version = "0.53", features = ["tcp", "noise", "yamux", "gossipsub", "mdns", "kad"] }
@@ -99,6 +102,18 @@ zstd = "0.13"
 
 # Memory management
 bytes = "1.0"
+
+# Ethereum compatibility
+web3 = "0.19"
+ethereum-types = "0.14"
+
+# Solana compatibility (using compatible versions)
+solana-client = "1.16"
+solana-sdk = "1.16"
+solana-transaction-status = "1.16"
+
+# Random number generation for simulations
+rand = "0.8"
 
 [dev-dependencies]
 tokio-test = "0.4"

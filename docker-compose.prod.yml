@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  postgres:
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    restart: unless-stopped
+
+  redis:
+    restart: unless-stopped
+
+  zookeeper:
+    restart: unless-stopped
+
+  kafka:
+    restart: unless-stopped
+
+  participant-node:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+    restart: unless-stopped
+
+  sync-domain:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      KAFKA_BROKERS: ${KAFKA_BROKERS}
+    restart: unless-stopped
+
+  global-synchronizer:
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      NODE_ID: ${NODE_ID}
+    restart: unless-stopped
+
+  backend-go:
+    environment:
+      PARTICIPANT_URL: ${PARTICIPANT_URL}
+      SYNCHRONIZER_URL: ${SYNCHRONIZER_URL}
+      POSTGRES_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+    restart: unless-stopped
+
+  api-gateway-go:
+    environment:
+      BACKEND_URL: ${BACKEND_URL}
+      PARTICIPANT_URL: ${PARTICIPANT_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: ${REDIS_URL}
+      RATE_LIMIT_RPM: ${RATE_LIMIT_RPM}
+    restart: unless-stopped
+
+  frontend:
+    restart: unless-stopped

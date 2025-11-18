@@ -899,6 +899,22 @@ impl GlobalSynchronizer {
         Ok(handle)
     }
     
+    /// Create wallet
+    pub async fn create_wallet(&self, request: wallet::CreateWalletRequest) -> GarpResult<wallet::CreateWalletResponse> {
+        self.bridge.wallet_manager.create_wallet(request).await
+            .map_err(|e| GarpError::InternalError(format!("Failed to create wallet: {}", e)))
+    }
+    
+    /// Get wallet
+    pub async fn get_wallet(&self, wallet_id: &str) -> GarpResult<Option<wallet::Wallet>> {
+        Ok(self.bridge.wallet_manager.get_wallet(wallet_id).await)
+    }
+    
+    /// List wallets
+    pub async fn list_wallets(&self) -> GarpResult<Vec<wallet::Wallet>> {
+        Ok(self.bridge.wallet_manager.list_wallets().await)
+    }
+    
     /// Initiate a cross-chain bridge transfer
     pub async fn initiate_bridge_transfer(
         &self,
@@ -950,6 +966,56 @@ impl GlobalSynchronizer {
     /// Get bridge validator
     pub async fn get_bridge_validator(&self, validator_id: &str) -> GarpResult<Option<BridgeValidator>> {
         self.bridge.get_validator(validator_id).await
+    }
+    
+    /// Get asset price
+    pub async fn get_asset_price(&self, symbol: &str) -> GarpResult<Option<f64>> {
+        Ok(self.bridge.price_oracle.get_price(symbol).await)
+    }
+    
+    /// Get conversion rate between two assets
+    pub async fn get_conversion_rate(&self, from: &str, to: &str) -> GarpResult<f64> {
+        Ok(self.bridge.price_oracle.get_conversion_rate(from, to).await)
+    }
+    
+    /// Get all asset prices
+    pub async fn get_all_prices(&self) -> GarpResult<HashMap<String, f64>> {
+        Ok(self.bridge.price_oracle.get_all_prices().await)
+    }
+    
+    /// Add liquidity to pool
+    pub async fn add_liquidity(&self, asset: String, amount: f64) -> GarpResult<()> {
+        self.bridge.liquidity_pool.add_liquidity(asset, amount).await
+            .map_err(|e| GarpError::InternalError(format!("Failed to add liquidity: {}", e)))
+    }
+    
+    /// Remove liquidity from pool
+    pub async fn remove_liquidity(&self, asset: String, amount: f64) -> GarpResult<f64> {
+        self.bridge.liquidity_pool.remove_liquidity(asset, amount).await
+            .map_err(|e| GarpError::InternalError(format!("Failed to remove liquidity: {}", e)))
+    }
+    
+    /// Swap tokens
+    pub async fn swap_tokens(&self, from_asset: String, to_asset: String, amount: f64) -> GarpResult<f64> {
+        self.bridge.liquidity_pool.swap(from_asset, to_asset, amount).await
+            .map_err(|e| GarpError::InternalError(format!("Failed to swap tokens: {}", e)))
+    }
+    
+    /// Get pool information
+    pub async fn get_pool_info(&self) -> GarpResult<bridge::liquidity::PoolInfo> {
+        self.bridge.liquidity_pool.get_pool_info().await
+            .map_err(|e| GarpError::InternalError(format!("Failed to get pool info: {}", e)))
+    }
+    
+    /// Get reserve for an asset
+    pub async fn get_reserve(&self, asset: &str) -> GarpResult<f64> {
+        Ok(self.bridge.liquidity_pool.get_reserve(asset).await)
+    }
+    
+    /// Get total value locked
+    pub async fn get_tvl(&self) -> GarpResult<f64> {
+        self.bridge.liquidity_pool.get_tvl().await
+            .map_err(|e| GarpError::InternalError(format!("Failed to get TVL: {}", e)))
     }
 }
 

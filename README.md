@@ -106,6 +106,23 @@ Run all tests:
 make test
 ```
 
+### Bridge Component Testing
+
+The cross-chain bridge functionality has been enhanced with comprehensive unit and integration tests:
+
+- Wallet management testing (multi-chain wallet creation, encryption/decryption)
+- Liquidity pool operations (adding/removing liquidity, token swapping)
+- Price oracle functionality (price retrieval, conversion rates)
+- Cross-chain connector validation (Ethereum, Polygon, BSC, Solana)
+
+To run bridge-specific tests:
+```bash
+cd global-synchronizer
+cargo test bridge
+```
+
+See `BRIDGE_TESTING_IMPROVEMENTS.md` for detailed documentation on the testing framework.
+
 ## Building
 
 Build all components:

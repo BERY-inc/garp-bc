@@ -1,160 +1,156 @@
-# GARP Blockchain Platform - Implementation Documentation
+# GARP Blockchain Platform Documentation
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Architecture](#architecture)
+3. [Components](#components)
+4. [Cross-Chain Bridge](#cross-chain-bridge)
+5. [API Documentation](#api-documentation)
+6. [Testing](#testing)
+7. [Deployment](#deployment)
+8. [Security](#security)
+9. [Recent Updates](#recent-updates)
 
 ## Overview
 
-The GARP Blockchain Platform is a comprehensive, enterprise-grade blockchain solution that implements a multi-layered architecture with participant nodes, synchronization domains, and global coordination mechanisms. This document provides a detailed overview of the completed implementation.
+The GARP blockchain platform is a distributed system designed for cross-domain atomic settlement with Byzantine Fault Tolerance (BFT) consensus. It features privacy-preserving transaction processing, secure execution environments, and interoperability with multiple blockchain networks.
 
-## Architecture Components
+## Architecture
 
-### 1. Participant Node (`participant-node`)
+The platform follows a modular architecture with the following key components:
 
-The participant node is the core component that runs the blockchain protocol and manages local state.
+- **Participant Node**: Handles private transactions, secure execution, WASM runtime, and ZK systems
+- **Sync Domain**: Manages domain synchronization using Kafka, vector clocks, and a sequencer
+- **Global Synchronizer**: Coordinates cross-domain settlement and global state sync
+- **Common Library**: Shared Rust library with consensus, crypto, network, and type definitions
 
-**Key Features Implemented:**
-- Real network layer implementation for inter-node communication
-- Block building and validation mechanisms
-- Smart contract execution engine
-- Privacy-preserving transaction processing
-- Wallet management and cryptographic operations
-- Secure execution environment for smart contracts
-- Zero-knowledge proof system for privacy
-
-**Files Modified:**
-- `src/node.rs`: Implemented RealNetworkLayer for actual network communication
-- `src/config.rs`: Added NetworkConfig struct for network configuration
-
-### 2. Sync Domain (`sync-domain`)
-
-The sync domain handles consensus within a domain and coordinates with other domains.
-
-**Key Features Implemented:**
-- Raft-based consensus mechanism
-- Kafka integration for message queuing
-- Domain-specific state management
-- Sequencing and ordering of transactions
-- Vector clock implementation for causality tracking
-
-**Files Modified:**
-- Enhanced consensus implementation with proper Raft protocol
-- Added Kafka integration for inter-domain communication
-
-### 3. Global Synchronizer (`global-synchronizer`)
-
-The global synchronizer coordinates cross-domain transactions and maintains global state consistency.
-
-**Key Features Implemented:**
-- Cross-domain transaction coordination
-- Global consensus mechanisms
-- Settlement processing for cross-domain transactions
-- Validator management and security protocols
-- Network layer for global communication
-
-### 4. Backend Service (`backend-go`)
-
-The backend service provides the business logic layer and database integration.
-
-**Key Features Implemented:**
-- PostgreSQL and Redis storage integration
-- Transaction processing and management
-- Contract deployment and execution
-- Wallet balance management
-- Event processing and storage
-- Migration system for database schema
-
-**Files Modified:**
-- Enhanced storage implementation with proper database operations
-- Added comprehensive transaction processing capabilities
-- Implemented contract management functionality
-
-### 5. API Gateway (`api-gateway-go`)
-
-The API gateway provides a unified interface for external applications to interact with the blockchain.
-
-**Key Features Implemented:**
-- Reverse proxy for all backend services
-- JWT-based authentication and authorization
-- CORS support for web applications
-- Request/response logging for monitoring
-- Rate limiting to prevent abuse
-- Error handling and response formatting
-
-**Files Modified:**
-- Enhanced routes with additional middleware
-- Improved proxy service with better error handling
-- Added JWT authentication support
-
-## Technical Implementation Details
-
-### Network Layer
-The participant node now implements a real network layer that can communicate with other nodes over HTTP/gRPC protocols, replacing the previous stub implementation.
-
-### Consensus Mechanism
-The sync domain implements a Raft-based consensus algorithm that ensures consistency within a domain, while the global synchronizer handles cross-domain consensus.
-
-### Privacy Features
-The platform includes advanced privacy features:
-- Zero-knowledge proofs for transaction privacy
-- Secure execution environment for smart contracts
-- Private state management
-- Privacy DSL for defining private computations
-
-### Storage
-The backend service implements a dual storage system:
-- PostgreSQL for persistent structured data
-- Redis for fast caching and queue processing
-
-### Security
-The platform implements multiple security layers:
-- JWT-based authentication
-- TLS/mTLS for secure communication
-- Cryptographic signing of transactions
-- Secure key management
-
-## Deployment Architecture
-
-The platform is designed for containerized deployment using Docker and can be orchestrated with Kubernetes. The `docker-compose.yml` file defines all services needed for a complete deployment:
-
-1. Databases: PostgreSQL and Redis
-2. Message Queue: Kafka and Zookeeper
-3. Blockchain Services: participant-node, sync-domain, global-synchronizer
-4. API Services: backend-go, api-gateway-go
-
-## API Endpoints
+## Components
 
 ### Participant Node
-- `/api/v1/node/status` - Node status information
-- `/api/v1/transactions` - Transaction submission and querying
-- `/api/v1/contracts` - Contract deployment and management
-- `/api/v1/wallet` - Wallet operations
-- `/api/v1/blocks` - Block information
-- `/api/v1/ledger` - Ledger checkpoint
+The participant node is responsible for:
+- Private transaction processing with zero-knowledge proofs
+- Secure execution environment for smart contracts
+- Wallet management and key storage
+- Privacy-preserving computation
 
-### Backend Service
-- `/transactions` - Transaction processing
-- `/contracts` - Contract management
-- `/accounts` - Account management
-- `/wallet` - Wallet operations
-- `/blocks` - Block information
-- `/privacy` - Privacy operations
+### Sync Domain
+The sync domain handles:
+- Cross-domain state synchronization
+- Consensus coordination
+- Event sequencing and ordering
+- Domain discovery and management
 
-### API Gateway
-- `/backend/*` - Proxy to backend service
-- `/participant/*` - Proxy to participant node
-- `/sync/*` - Proxy to global synchronizer
+### Global Synchronizer
+The global synchronizer provides:
+- Cross-domain atomic settlement
+- Global state consistency
+- Validator set management
+- Bridge operations for external networks
+
+## Cross-Chain Bridge
+
+The cross-chain bridge enables seamless asset transfers between the GARP blockchain and other major blockchain networks including Ethereum, Polygon, BSC, and Solana.
+
+### Bridge Components
+
+1. **Wallet Manager**: Secure multi-chain wallet creation and management
+2. **Liquidity Pools**: Automated market makers for token swaps
+3. **Price Oracle**: Real-time asset pricing from external sources
+4. **Chain Connectors**: Native connectors for each supported blockchain
+5. **Asset Mapping**: Cross-chain asset identification and conversion
+
+### Bridge Operations
+
+- Asset transfers between supported chains
+- Token swapping with automated market making
+- Real-time price feed integration
+- Multi-signature transaction validation
+
+## API Documentation
+
+### REST API
+The platform provides a comprehensive REST API for all functionality:
+
+- Transaction submission and monitoring
+- Block and account information retrieval
+- Validator management
+- Smart contract deployment and interaction
+- Bridge operations (cross-chain transfers, swaps, etc.)
+
+### gRPC Services
+High-performance gRPC endpoints are available for:
+- Real-time streaming updates
+- Batch operations
+- Cross-language compatibility
 
 ## Testing
 
-The implementation includes comprehensive testing:
-- Unit tests for core components
-- Integration tests for inter-component communication
-- Privacy engine tests for cryptographic operations
-- Benchmark tests for performance evaluation
+The GARP platform includes comprehensive testing at multiple levels:
 
-## Future Enhancements
+### Unit Tests
+- Component-level testing for all core functionality
+- Bridge component testing (wallets, liquidity pools, oracles)
+- Cross-chain connector validation
 
-While the current implementation is feature-complete, potential future enhancements include:
-- Additional consensus algorithms (PoS, PoA)
-- Enhanced privacy features
-- Improved scalability mechanisms
-- Additional smart contract languages
-- Advanced monitoring and analytics
+### Integration Tests
+- End-to-end testing of cross-domain operations
+- Bridge transaction lifecycle verification
+- Multi-node cluster testing
+
+### Performance Tests
+- Load testing under various conditions
+- Stress testing for high-throughput scenarios
+- Resource utilization monitoring
+
+For detailed information about recent testing improvements, see [Recent Updates](#recent-updates).
+
+## Deployment
+
+### Local Development
+The platform can be run locally using:
+- Docker Compose for simplified setup
+- Manual installation with required dependencies
+- Kubernetes for containerized deployment
+
+### Production Deployment
+Production deployments should include:
+- Multiple validator nodes for consensus
+- Load balancers for high availability
+- Monitoring and alerting systems
+- Backup and disaster recovery procedures
+
+## Security
+
+### Encryption
+- AES-256 encryption for sensitive data
+- Hardware Security Module (HSM) integration
+- Secure key storage and management
+
+### Authentication
+- Multi-factor authentication support
+- Role-based access control
+- LDAP and OAuth integration
+
+### Auditing
+- Comprehensive audit logging
+- Real-time security monitoring
+- Compliance reporting (GDPR, HIPAA, SOX)
+
+## Recent Updates
+
+The GARP blockchain platform has recently been enhanced with comprehensive testing improvements and documentation updates:
+
+### Testing Framework Enhancements
+- Added unit tests for wallet management functionality
+- Created unit tests for liquidity pool operations
+- Implemented unit tests for price oracle functionality
+- Developed unit tests for Ethereum connector
+- Added integration tests for end-to-end bridge functionality
+
+### Documentation Improvements
+- Created detailed documentation of testing improvements
+- Added comprehensive summaries of all platform enhancements
+- Updated README files with testing instructions
+- Provided clear examples of how to run tests
+
+These improvements significantly enhance the reliability and maintainability of the platform. For a complete overview of all recent updates, see [RECENT_UPDATES_SUMMARY.md](RECENT_UPDATES_SUMMARY.md).
