@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+
+<head>
+  <meta charset="UTF-8">
+
+  <title>Garp Blockchain - Powering Decentralized Innovation</title>
+
+  <meta name="description"
+    content="Build and scale the next generation of decentralized applications on Garp, a secure, scalable, and developer-friendly blockchain engineered for high performance.">
+  <meta name="keywords" content="garp, blockchain, decentralized, DApp, web3, smart contracts, rust, go, c++, WASM">
+  <meta name="author" content="Garp Foundation">
+
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+
+  <link rel="icon" href="img/favicon/favicon.ico" sizes="any">
+  <link rel="icon" href="img/favicon/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="img/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="img/favicon/manifest.webmanifest">
+  <meta property="og:image:height" content="1200">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:title" content="Garp Blockchain - Powering Decentralized Innovation">
+  <meta property="og:description"
+    content="Build and scale  decentralized applications on a secure, scalable, and developer-friendly blockchain.">
+  <meta property="og:url" content="https://garp.dev/">
+  <meta property="og:image" content="img/og-image.html">
+  <link rel="stylesheet" type="text/css" href="css/loaders/loader.min.css">
+  <link rel="stylesheet" type="text/css" href="css/plugins.min.css">
+  <link rel="stylesheet" type="text/css" href="css/main.min.css">
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FAF7F6">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161616">
+  <meta name="msapplication-navbutton-color" content="#161616">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+
+<body>
+
+  <div id="loader" class="loader">
+    <div class="loader__wrapper">
+      <div class="loader__content">
+        <div class="loader__count">
+          <span class="count__text">0</span>
+          <span class="count__percent">%</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <nav class="mxd-nav__wrap" data-lenis-prevent="">
+
+    <div class="mxd-nav__contain loading__fade">
+      <a href="#0" class="mxd-nav__hamburger">
+        <div class="hamburger__base"></div>
+        <div class="hamburger__line"></div>
+        <div class="hamburger__line"></div>
+      </a>
+    </div>
+    <div class="mxd-menu__wrapper">
+      <div class="mxd-menu__base"></div>
+      <div class="mxd-menu__contain">
+        <div class="mxd-menu__inner">
+          <div class="mxd-menu__left">
+            <p class="mxd-menu__caption menu-fade-in">The blockchain for the next generation of decentralized finance
+              and enterprise solutions.</p>
+            <div class="main-menu">
+              <nav class="main-menu__content">
+                <ul id="main-menu" class="main-menu__accordion">
+                  <li class="main-menu__item">
+                    <a class="main-menu__link btn btn-anim" href="index.html">
+                      <span class="btn-caption">Home</span>
+                    </a>
+                  </li>
+                  <li class="main-menu__item">
+                    <a class="main-menu__link btn btn-anim" href="#features">
+                      <span class="btn-caption">Features</span>
+                    </a>
+                  </li>
+                  <li class="main-menu__item">
+                    <a class="main-menu__link btn btn-anim" href="#community">
+                      <span class="btn-caption">Community</span>
+                    </a>
+                  </li>
+                  <li class="main-menu__item">
+                    <a class="main-menu__link btn btn-anim" href="contact.html">
+                      <span class="btn-caption">Contact</span>
+                    </a>
+                  </li>
+                </ul>
+              </nav>
+            </div>
+          </div>
+          <div class="mxd-menu__right">
+            <div class="menu-promo">
+              <div class="menu-promo__content">
+                <p class="menu-promo__caption menu-fade-in">All the resources you need to succeed in the Web3 world.</p>
+                <div class="menu-promo__video">
+                  <video class="menu-video" id="inner-video" preload="auto" autoplay="autoplay" loop="loop"
+                    muted="muted" poster="video/540x310_video-01.webp">
+                    <source type="video/mp4" src="video/540x310_video-01.mp4">
+                    <source type="video/webm" src="video/540x310_video-01.webm">
+                    <source type="video/ogv" src="video/540x310_video-01.ogv">
+                  </video>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="mxd-menu__data menu-fade-in">
+            <p class="t-xsmall">
+              <i class="ph ph-copyright"></i>
+              Garp Blockchain 2025
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </nav>
+  <header id="header" class="mxd-header">
+    <div class="mxd-header__logo loading__fade">
+      <a href="index.html" class="mxd-logo">
+        <svg class="mxd-logo__image" version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px"
+          viewBox="0 0 56 56" style="enable-background:new 0 0 56 56;" xml:space="preserve">
+          <style type="text/css">
+            .mxd-logo__bg {
+              fill: var(--base-opp);
+            }
+
+            .mxd-logo__cat {
+              clip-path: url(#mxd-logo__id);
+              fill: var(--base);
+            }
+          </style>
+          <path class="mxd-logo__bg" d="M56,28c0,11.1-2.9,28-28,28S0,39.1,0,28S2.9,0,28,0S56,16.9,56,28z" />
+          <g>
+            <defs>
+              <path id="mxd-logo__clippath" d="M28,0C2.9,0,0,16.9,0,28s2.9,28,28,28s28-16.9,28-28S53.1,0,28,0z" />
+            </defs>
+            <clipPath id="mxd-logo__id">
+              <use xlink:href="#mxd-logo__clippath" style="overflow:visible;" />
+            </clipPath>
+            <path class="mxd-logo__cat"
+              d="M33.6,34.5h0.9
+                                c0.5,0,0.9,0.4,0.9,0.9v3.7c0,0.5-0.4,0.9-0.9,0.9h-0.9c-0.5,0-0.9-0.4-0.9-0.9v-3.7C32.7,34.9,33.1,34.5,33.6,34.5z M20.5,37.3
+                                v1.9c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-3.7c0-0.5-0.4-0.9-0.9-0.9h-0.9c-0.5,0-0.9,0.4-0.9,0.9V37.3L20.5,37.3z
+                                M39.2,21.5v0.9c0,0.5-0.4,0.9-0.9,0.9h-0.9c-0.5,0-0.9-0.4-0.9-0.9v-0.9c0-0.5,0.4-0.9,0.9-0.9h0.9C38.8,20.5,39.2,21,39.2,21.5z
+                                M34.5,26.1h0.9c0.5,0,0.9-0.4,0.9-0.9v-0.9c0-0.5-0.4-0.9-0.9-0.9h-0.9c-0.5,0-0.9,0.4-0.9,0.9v0.9C33.6,25.7,34,26.1,34.5,26.1z
+                                M28,26.1h-4.7c-0.5,0-0.9,0.4-0.9,0.9V28c0,0.5,0.4,0.9,0.9,0.9h9.3c0.5,0,0.9-0.4,0.9-0.9v-0.9c0-0.5-0.4-0.9-0.9-0.9H28L28,26.1
+                                z M19.6,24.3v0.9c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-0.9c0-0.5-0.4-0.9-0.9-0.9h-0.9C20,23.3,19.6,23.8,19.6,24.3z
+                                M16.8,21.5v0.9c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-0.9c0-0.5-0.4-0.9-0.9-0.9h-0.9C17.2,20.5,16.8,21,16.8,21.5z
+                                M14,26.1v4.7c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-6.5c0-0.5-0.4-0.9-0.9-0.9h-0.9c-0.5,0-0.9,0.4-0.9,0.9V26.1
+                                L14,26.1z M11.2,34.5v1.9c0,0.5-0.4,0.9-0.9,0.9H7.5c-0.5,0-0.9,0.4-0.9,0.9v0.9c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9,0.4,0.9,0.9
+                                V42c0,0.5-0.4,0.9-0.9,0.9H7.5c-0.5,0-0.9,0.4-0.9,0.9v0.9c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9,0.4,0.9,0.9V56
+                                c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-6.5c0-0.5,0.4-0.9,0.9-0.9h3.7c0.5,0,0.9-0.4,0.9-0.9v-0.9
+                                c0-0.5-0.4-0.9-0.9-0.9h-3.7c-0.5,0-0.9-0.4-0.9-0.9v-6.5c0-0.5,0.4-0.9,0.9-0.9c0.5,0,0.9-0.4,0.9-0.9v-3.7c0-0.5-0.4-0.9-0.9-0.9
+                                h-0.9c-0.5,0-0.9,0.4-0.9,0.9L11.2,34.5L11.2,34.5z M42,26.1v-1.9c0-0.5-0.4-0.9-0.9-0.9h-0.9c-0.5,0-0.9,0.4-0.9,0.9v6.5
+                                c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9V26.1L42,26.1z M49.5,39.2v-0.9c0-0.5-0.4-0.9-0.9-0.9h-2.8
+                                c-0.5,0-0.9-0.4-0.9-0.9v-3.7c0-0.5-0.4-0.9-0.9-0.9h-0.9c-0.5,0-0.9,0.4-0.9,0.9v3.7c0,0.5,0.4,0.9,0.9,0.9c0.5,0,0.9,0.4,0.9,0.9
+                                v6.5c0,0.5-0.4,0.9-0.9,0.9h-3.7c-0.5,0-0.9,0.4-0.9,0.9v0.9c0,0.5,0.4,0.9,0.9,0.9h3.7c0.5,0,0.9,0.4,0.9,0.9V56
+                                c0,0.5,0.4,0.9,0.9,0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-9.3c0-0.5,0.4-0.9,0.9-0.9h0.9c0.5,0,0.9-0.4,0.9-0.9v-0.9
+                                c0-0.5-0.4-0.9-0.9-0.9h-0.9c-0.5,0-0.9-0.4-0.9-0.9v-0.9c0-0.5,0.4-0.9,0.9-0.9h0.9C49,40.1,49.5,39.7,49.5,39.2L49.5,39.2z" />
+          </g>
+        </svg>
+        <span class="mxd-logo__text">Garp<br>Blockchain</span>
+      </a>
+    </div>
+    <div class="mxd-header__controls loading__fade">
+      <button id="color-switcher" class="mxd-color-switcher" type="button" role="switch" aria-label="light/dark mode"
+        aria-checked="true"></button>
+      <a class="btn btn-anim btn-default btn-mobile-icon btn-outline slide-right-up" href="contact.html">
+        <span class="btn-caption">Start Building</span>
+        <i class="ph-bold ph-arrow-up-right"></i>
+      </a>
+    </div>
+  </header>
+  <main id="mxd-page-content" class="mxd-page-content">
+
+    <div class="mxd-section mxd-hero-section padding-grid-pre-mtext">
+      <div class="mxd-hero-03">
+        <div class="mxd-hero-03__wrap loading-wrap">
+          <div class="mxd-hero-03__top">
+            <div class="mxd-hero-03__marquee loading__item">
+              <div class="marquee marquee-right--gsap">
+                <div class="marquee__toright">
+                  <div class="marquee__item one-line">
+                    <div class="hero-03-marquee__video">
+                      <video preload="auto" autoplay="autoplay" loop="loop" muted="muted"
+                        poster="video/hero/hero-video-02.webp">
+                        <source type="video/mp4" src="video/hero/hero-video-02.mp4">
+                        <source type="video/webm" src="video/hero/hero-video-02.webm">
+                        <source type="video/ogv" src="video/hero/hero-video-02.ogv">
+                      </video>
+                    </div>
+                  </div>
+                  <div class="marquee__item one-line">
+                    <div class="hero-03-marquee__image">
+                      <img class="mxd-move" src="img/hero/29_hero-img.webp" alt="Image">
+                    </div>
+                  </div>
+                  <div class="marquee__item one-line">
+                    <div class="hero-03-marquee__video">
+                      <video preload="auto" autoplay="autoplay" loop="loop" muted="muted"
+                        poster="video/hero/hero-video-01.webp">
+                        <source type="video/mp4" src="video/hero/hero-video-01.mp4">
+                        <source type="video/webm" src="video/hero/hero-video-01.webm">
+                        <source type="video/ogv" src="video/hero/hero-video-01.ogv">
+                      </video>
+                    </div>
+                  </div>
+                  <div class="marquee__item one-line">
+                    <div class="hero-03-marquee__image">
+                      <img class="mxd-rotate-slow" src="img/hero/28_hero-img.webp" alt="Image">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="mxd-hero-03__headline">
+              <h1 class="hero-03-headline__caption loading__item">Garp Blockchain:<br>Powering Decentralized Innovation
+              </h1>
+              <p class="h5 loading__item">Build and scale the next generation of DApps on a secure, scalable, and
+                developer-friendly blockchain.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mxd-section padding-mtext-pre-grid">
+      <div class="mxd-container fullwidth-container">
+
+        <div class="mxd-block">
+          <div class="marquee marquee-right--gsap muted-extra">
+            <div class="marquee__toright">
+              <div class="marquee__item one-line item-regular text">
+                <p class="marquee__text">Hybrid Consensus</p>
+                <div class="marquee__image">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="currentColor">
+                    <path fill="currentColor"
+                      d="M78.4,38.4c0,0-11.8,0-15.8,0c-1.6,0-4.8-0.2-7.1-0.8c-2.3-0.6-4.3-0.8-6.3-2.4c-2-1.2-3.5-3.2-4.7-4.8 c-1.2-1.6-1.6-3.6-2-5.5c-0.3-1.5-0.7-4.3-0.8-5.9c-0.2-4.3,0-17.4,0-17.4C41.8,0.8,41,0,40.2,0s-1.6,0.8-1.6,1.6c0,0,0,13.1,0,17.4 c0,1.6-0.6,4.3-0.8,5.9c-0.3,2-0.8,4-2,5.5c-1.2,2-2.8,3.6-4.7,4.8s-4,1.8-6.3,2.4c-1.9,0.5-4.7,0.6-6.7,0.8c-3.9,0.4-16.6,0-16.6,0 C0.8,38.4,0,39.2,0,40c0,0.8,0.8,1.6,1.6,1.6c0,0,12.2,0,16.6,0c1.6,0,4.8,0.3,6.7,0.8c2.3,0.6,4.3,0.8,6.3,2.4 c1.6,1.2,3.2,2.8,4.3,4.4c1.2,2,2.1,3.9,2.4,6.3c0.2,1.7,0.7,4.7,0.8,6.7c0.2,4,0,16.2,0,16.2c0,0.8,0.8,1.6,1.6,1.6 s1.6-0.8,1.6-1.6c0,0,0-12.3,0-16.2c0-1.6,0.5-5.1,0.8-6.7c0.5-2.3,0.8-4.4,2.4-6.3c1.2-1.6,2.8-3.2,4.3-4.4c2-1.2,3.9-2,6.3-2.4 c1.8-0.3,5.1-0.7,7.1-0.8c3.5-0.2,15.8,0,15.8,0c0.8,0,1.6-0.8,1.6-1.6C80,39.2,79.2,38.4,78.4,38.4C78.4,38.4,78.4,38.4,78.4,38.4z" />
+                  </svg>
+                </div>
+              </div>
+              <div class="marquee__item one-line item-regular text">
+                <p class="marquee__text">Dynamic Sharding</p>
+                <div class="marquee__image">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="currentColor">
+                    <path fill="currentColor"
+                      d="M78.4,38.4c0,0-11.8,0-15.8,0c-1.6,0-4.8-0.2-7.1-0.8c-2.3-0.6-4.3-0.8-6.3-2.4c-2-1.2-3.5-3.2-4.7-4.8 c-1.2-1.6-1.6-3.6-2-5.5c-0.3-1.5-0.7-4.3-0.8-5.9c-0.2-4.3,0-17.4,0-17.4C41.8,0.8,41,0,40.2,0s-1.6,0.8-1.6,1.6c0,0,0,13.1,0,17.4 c0,1.6-0.6,4.3-0.8,5.9c-0.3,2-0.8,4-2,5.5c-1.2,2-2.8,3.6-4.7,4.8s-4,1.8-6.3,2.4c-1.9,0.5-4.7,0.6-6.7,0.8c-3.9,0.4-16.6,0-16.6,0 C0.8,38.4,0,39.2,0,40c0,0.8,0.8,1.6,1.6,1.6c0,0,12.2,0,16.6,0c1.6,0,4.8,0.3,6.7,0.8c2.3,0.6,4.3,0.8,6.3,2.4 c1.6,1.2,3.2,2.8,4.3,4.4c1.2,2,2.1,3.9,2.4,6.3c0.2,1.7,0.7,4.7,0.8,6.7c0.2,4,0,16.2,0,16.2c0,0.8,0.8,1.6,1.6,1.6 s1.6-0.8,1.6-1.6c0,0,0-12.3,0-16.2c0-1.6,0.5-5.1,0.8-6.7c0.5-2.3,0.8-4.4,2.4-6.3c1.2-1.6,2.8-3.2,4.3-4.4c2-1.2,3.9-2,6.3-2.4 c1.8-0.3,5.1-0.7,7.1-0.8c3.5-0.2,15.8,0,15.8,0c0.8,0,1.6-0.8,1.6-1.6C80,39.2,79.2,38.4,78.4,38.4C78.4,38.4,78.4,38.4,78.4,38.4z" />
+                  </svg>
+                </div>
+              </div>
+              <div class="marquee__item one-line item-regular text">
+                <p class="marquee__text">WASM Contracts</p>
+                <div class="marquee__image">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="currentColor">
+                    <path fill="currentColor"
+                      d="M78.4,38.4c0,0-11.8,0-15.8,0c-1.6,0-4.8-0.2-7.1-0.8c-2.3-0.6-4.3-0.8-6.3-2.4c-2-1.2-3.5-3.2-4.7-4.8 c-1.2-1.6-1.6-3.6-2-5.5c-0.3-1.5-0.7-4.3-0.8-5.9c-0.2-4.3,0-17.4,0-17.4C41.8,0.8,41,0,40.2,0s-1.6,0.8-1.6,1.6c0,0,0,13.1,0,17.4 c0,1.6-0.6,4.3-0.8,5.9c-0.3,2-0.8,4-2,5.5c-1.2,2-2.8,3.6-4.7,4.8s-4,1.8-6.3,2.4c-1.9,0.5-4.7,0.6-6.7,0.8c-3.9,0.4-16.6,0-16.6,0 C0.8,38.4,0,39.2,0,40c0,0.8,0.8,1.6,1.6,1.6c0,0,12.2,0,16.6,0c1.6,0,4.8,0.3,6.7,0.8c2.3,0.6,4.3,0.8,6.3,2.4 c1.6,1.2,3.2,2.8,4.3,4.4c1.2,2,2.1,3.9,2.4,6.3c0.2,1.7,0.7,4.7,0.8,6.7c0.2,4,0,16.2,0,16.2c0,0.8,0.8,1.6,1.6,1.6 s1.6-0.8,1.6-1.6c0,0,0-12.3,0-16.2c0-1.6,0.5-5.1,0.8-6.7c0.5-2.3,0.8-4.4,2.4-6.3c1.2-1.6,2.8-3.2,4.3-4.4c2-1.2,3.9-2,6.3-2.4 c1.8-0.3,5.1-0.7,7.1-0.8c3.5-0.2,15.8,0,15.8,0c0.8,0,1.6-0.8,1.6-1.6C80,39.2,79.2,38.4,78.4,38.4C78.4,38.4,78.4,38.4,78.4,38.4z" />
+                  </svg>
+                </div>
+              </div>
+              <div class="marquee__item one-line item-regular text">
+                <p class="marquee__text">Cross-Chain</p>
+                <div class="marquee__image">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="currentColor">
+                    <path fill="currentColor"
+                      d="M78.4,38.4c0,0-11.8,0-15.8,0c-1.6,0-4.8-0.2-7.1-0.8c-2.3-0.6-4.3-0.8-6.3-2.4c-2-1.2-3.5-3.2-4.7-4.8 c-1.2-1.6-1.6-3.6-2-5.5c-0.3-1.5-0.7-4.3-0.8-5.9c-0.2-4.3,0-17.4,0-17.4C41.8,0.8,41,0,40.2,0s-1.6,0.8-1.6,1.6c0,0,0,13.1,0,17.4 c0,1.6-0.6,4.3-0.8,5.9c-0.3,2-0.8,4-2,5.5c-1.2,2-2.8,3.6-4.7,4.8s-4,1.8-6.3,2.4c-1.9,0.5-4.7,0.6-6.7,0.8c-3.9,0.4-16.6,0-16.6,0 C0.8,38.4,0,39.2,0,40c0,0.8,0.8,1.6,1.6,1.6c0,0,12.2,0,16.6,0c1.6,0,4.8,0.3,6.7,0.8c2.3,0.6,4.3,0.8,6.3,2.4 c1.6,1.2,3.2,2.8,4.3,4.4c1.2,2,2.1,3.9,2.4,6.3c0.2,1.7,0.7,4.7,0.8,6.7c0.2,4,0,16.2,0,16.2c0,0.8,0.8,1.6,1.6,1.6 s1.6-0.8,1.6-1.6c0,0,0-12.3,0-16.2c0-1.6,0.5-5.1,0.8-6.7c0.5-2.3,0.8-4.4,2.4-6.3c1.2-1.6,2.8-3.2,4.3-4.4c2-1.2,3.9-2,6.3-2.4 c1.8-0.3,5.1-0.7,7.1-0.8c3.5-0.2,15.8,0,15.8,0c0.8,0,1.6-0.8,1.6-1.6C80,39.2,79.2,38.4,78.4,38.4C78.4,38.4,78.4,38.4,78.4,38.4z" />
+                  </svg>
+                </div>
+              </div>
+              <div class="marquee__item one-line item-regular text">
+                <p class="marquee__text">Developer Friendly</p>
+                <div class="marquee__image">
+                  <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="currentColor">
+                    <path fill="currentColor"
+                      d="M78.4,38.4c0,0-11.8,0-15.8,0c-1.6,0-4.8-0.2-7.1-0.8c-2.3-0.6-4.3-0.8-6.3-2.4c-2-1.2-3.5-3.2-4.7-4.8 c-1.2-1.6-1.6-3.6-2-5.5c-0.3-1.5-0.7-4.3-0.8-5.9c-0.2-4.3,0-17.4,0-17.4C41.8,0.8,41,0,40.2,0s-1.6,0.8-1.6,1.6c0,0,0,13.1,0,17.4 c0,1.6-0.6,4.3-0.8,5.9c-0.3,2-0.8,4-2,5.5c-1.2,2-2.8,3.6-4.7,4.8s-4,1.8-6.3,2.4c-1.9,0.5-4.7,0.6-6.7,0.8c-3.9,0.4-16.6,0-16.6,0 C0.8,38.4,0,39.2,0,40c0,0.8,0.8,1.6,1.6,1.6c0,0,12.2,0,16.6,0c1.6,0,4.8,0.3,6.7,0.8c2.3,0.6,4.3,0.8,6.3,2.4 c1.6,1.2,3.2,2.8,4.3,4.4c1.2,2,2.1,3.9,2.4,6.3c0.2,1.7,0.7,4.7,0.8,6.7c0.2,4,0,16.2,0,16.2c0,0.8,0.8,1.6,1.6,1.6 s1.6-0.8,1.6-1.6c0,0,0-12.3,0-16.2c0-1.6,0.5-5.1,0.8-6.7c0.5-2.3,0.8-4.4,2.4-6.3c1.2-1.6,2.8-3.2,4.3-4.4c2-1.2,3.9-2,6.3-2.4 c1.8-0.3,5.1-0.7,7.1-0.8c3.5-0.2,15.8,0,15.8,0c0.8,0,1.6-0.8,1.6-1.6C80,39.2,79.2,38.4,78.4,38.4C78.4,38.4,78.4,38.4,78.4,38.4z" />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="features" class="mxd-section overflow-hidden padding-pre-title">
+      <div class="mxd-container grid-container">
+
+        <div class="mxd-block">
+          <div class="mxd-services-cards-s">
+            <div class="container-fluid px-0">
+              <div class="row gx-0">
+                <div class="col-12 col-xl-8 mxd-services-cards-s__item mxd-grid-item anim-uni-scale-in-right">
+                  <div class="mxd-services-cards-s__inner justify-between bg-base-tint radius-l padding-4">
+                    <div class="mxd-services-cards-s__title">
+                      <h3 class="anim-uni-in-up">Hybrid<br>Consensus</h3>
+                    </div>
+                    <div class="mxd-services-cards-s__info width-50">
+                      <div class="mxd-services-cards-s__tags">
+                        <span class="tag tag-default tag-outline anim-uni-in-up">PoS</span>
+                        <span class="tag tag-default tag-outline anim-uni-in-up">DPoS</span>
+                        <span class="tag tag-default tag-outline anim-uni-in-up">PoH</span>
+                      </div>
+                      <p class="anim-uni-in-up">Garp combines Proof of Stake (PoS), Delegated Proof of Stake (DPoS), and
+                        Proof of History (PoH) to provide high throughput and robust security for every transaction.</p>
+                    </div>
+                    <div class="mxd-services-cards-s__image image-right">
+                      <img src="img/illustrations/1200x1200_service-image-01.webp" alt="Illustration">
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 col-xl-4 mxd-services-cards-s__item mxd-grid-item anim-uni-scale-in-left">
+                  <div class="mxd-services-cards-s__inner justify-end bg-accent radius-l padding-4">
+                    <div class="mxd-services-cards-s__title">
+                      <h3 class="opposite anim-uni-in-up">Scalability</h3>
+                    </div>
+                    <div class="mxd-services-cards-s__info">
+                      <div class="mxd-services-cards-s__tags">
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">Sharding</span>
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">Layer 2</span>
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">65,000+ TPS</span>
+                      </div>
+                      <p class="t-opposite anim-uni-in-up">With dynamic sharding and Layer 2 solutions, Garp distributes
+                        network load to handle over 65,000 transactions per second.</p>
+                    </div>
+                    <div class="mxd-services-cards-s__image image-top-right">
+                      <img class="mxd-move" src="img/illustrations/1200x1200_service-image-02.webp" alt="Illustration">
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 col-xl-4 mxd-services-cards-s__item mxd-grid-item anim-uni-scale-in-right">
+                  <div class="mxd-services-cards-s__inner bg-additional radius-l padding-4">
+                    <div class="mxd-services-cards-s__title">
+                      <h3 class="anim-uni-in-up">WASM Contracts</h3>
+                    </div>
+                    <div class="mxd-services-cards-s__info">
+                      <div class="mxd-services-cards-s__tags">
+                        <span class="tag tag-default tag-outline anim-uni-in-up">Rust</span>
+                        <span class="tag tag-default tag-outline anim-uni-in-up">Go</span>
+                        <span class="tag tag-default tag-outline anim-uni-in-up">C++</span>
+                      </div>
+                      <p class="t-bright anim-uni-in-up">Smart contracts are powered by a WebAssembly (WASM) VM,
+                        providing near-native performance and multi-language support.</p>
+                    </div>
+                    <div class="mxd-services-cards-s__image image-bottom">
+                      <img class="mxd-rotate-slow" src="img/illustrations/1200x1200_service-image-03.webp"
+                        alt="Illustration">
+                    </div>
+                  </div>
+                </div>
+                <div class="col-12 col-xl-8 mxd-services-cards-s__item mxd-grid-item anim-uni-scale-in-left">
+                  <div class="mxd-services-cards-s__inner justify-between bg-base-opp radius-l padding-4">
+                    <div class="mxd-services-cards-s__title">
+                      <h3 class="opposite anim-uni-in-up">Developer<br>Friendly</h3>
+                    </div>
+                    <div class="mxd-services-cards-s__info width-50">
+                      <div class="mxd-services-cards-s__tags">
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">SDKs</span>
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">CLI</span>
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">Web3.js</span>
+                        <span class="tag tag-default tag-outline-opposite anim-uni-in-up">JSON-RPC</span>
+                      </div>
+                      <p class="t-opposite anim-uni-in-up">Robust tools, including multi-language SDKs, a powerful CLI,
+                        and Web3 integration for fast development cycles.</p>
+                    </div>
+                    <div class="mxd-services-cards-s__image image-bottom image-bottom-2">
+                      <img src="img/illustrations/1200x1200_service-image-04.webp" alt="Illustration">
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="mxd-section overflow-hidden">
+      <div class="mxd-container">
+
+        <div class="mxd-block">
+          <div class="mxd-promo">
+            <div class="mxd-promo__inner anim-zoom-out-container">
+              <div class="mxd-promo__bg"></div>
+              <div class="mxd-promo__content">
+                <p class="mxd-promo__title anim-uni-in-up">
+                  <span class="mxd-promo__icon">
+                    <img src="img/icons/300x300_obj-cta-01.webp" alt="Icon">
+                  </span>
+                  <span class="mxd-promo__caption reveal-type">Ready to get started with Garp?</span>
+                </p>
+                <div class="mxd-promo__controls anim-uni-in-up">
+                  <a class="btn btn-anim btn-default btn-large btn-additional slide-right-up" href="mailto:contact@garp.fun?subject=Message%20from%20Website">
+                    <span class="btn-caption">Contact Us</span>
+                    <i class="ph-bold ph-arrow-up-right"></i>
+                  </a>
+                </div>
+              </div>
+              <div class="mxd-promo__images">
+                <img class="promo-image promo-image-1" src="img/illustrations/cta-img-01.webp" alt="Image">
+                <img class="promo-image promo-image-2" src="img/illustrations/cta-img-02.webp" alt="Image">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <footer id="mxd-footer" class="mxd-footer">
+
+    <div id="community" class="mxd-footer__footer-blocks">
+      <div class="footer-blocks__column animate-card-3">
+        <div class="footer-blocks__card fullheight-card">
+          <div class="footer-blocks__nav">
+            <ul class="footer-nav">
+              <li class="footer-nav__item anim-uni-in-up">
+                <a href="#features" class="footer-nav__link btn-anim">
+                  <span class="btn-caption">Features</span>
+                </a>
+              </li>
+              <li class="footer-nav__item anim-uni-in-up">
+                <a href="faq.html" class="footer-nav__link btn-anim">
+                  <span class="btn-caption">FAQ</span>
+                </a>
+              </li>
+              <li class="footer-nav__item anim-uni-in-up">
+                <a href="tutorials.html" class="footer-nav__link btn-anim">
+                  <span class="btn-caption">Tutorials</span>
+                </a>
+              </li>
+              <li class="footer-nav__item anim-uni-in-up">
+                <a href="contact.html" class="footer-nav__link btn-anim">
+                  <span class="btn-caption">Contact</span>
+                </a>
+              </li>
+            </ul>
+          </div>
+          <div class="footer-blocks__links anim-uni-in-up">
+            <a class="btn btn-line-xsmall btn-muted slide-right anim-no-delay" href="#0">
+              <span class="btn-caption">Privacy Policy</span>
+              <i class="ph ph-arrow-right"></i>
+            </a>
+            <a class="btn btn-line-xsmall btn-muted slide-right anim-no-delay" href="#0">
+              <span class="btn-caption">Terms & conditions</span>
+              <i class="ph ph-arrow-right"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-blocks__column animate-card-3">
+        <div class="footer-blocks__card">
+          <p class="mxd-point-subtitle anim-uni-in-up">
+            <svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="20px" height="20px"
+              viewBox="0 0 20 20" fill="currentColor">
+              <path fill="currentColor"
+                d="M19.6,9.6c0,0-3,0-4,0c-0.4,0-1.8-0.2-1.8-0.2c-0.6-0.1-1.1-0.2-1.6-0.6c-0.5-0.3-0.9-0.8-1.2-1.2 c-0.3-0.4-0.4-0.9-0.5-1.4c0,0-0.1-1.1-0.2-1.5c-0.1-1.1,0-4.4,0-4.4C10.4,0.2,10.2,0,10,0S9.6,0.2,9.6,0.4c0,0,0.1,3.3,0,4.4 c0,0.4-0.2,1.5-0.2,1.5C9.4,6.7,9.2,7.2,9,7.6C8.7,8.1,8.2,8.5,7.8,8.9c-0.5,0.3-1,0.5-1.6,0.6c0,0-1.2,0.1-1.7,0.2 c-1,0.1-4.2,0-4.2,0C0.2,9.6,0,9.8,0,10c0,0.2,0.2,0.4,0.4,0.4c0,0,3.1-0.1,4.2,0c0.4,0,1.7,0.2,1.7,0.2c0.6,0.1,1.1,0.2,1.6,0.6 c0.4,0.3,0.8,0.7,1.1,1.1c0.3,0.5,0.5,1,0.6,1.6c0,0,0.1,1.3,0.2,1.7c0,1,0,4.1,0,4.1c0,0.2,0.2,0.4,0.4,0.4s0.4-0.2,0.4-0.4 c0,0,0-3.1,0-4.1c0-0.4,0.2-1.7,0.2-1.7c0.1-0.6,0.2-1.1,0.6-1.6c0.3-0.4,0.7-0.8,1.1-1.1c0.5-0.3,1-0.5,1.6-0.6 c0,0,1.3-0.1,1.8-0.2c1,0,4,0,4,0c0.2,0,0.4-0.2,0.4-0.4C20,9.8,19.8,9.6,19.6,9.6L19.6,9.6z">
+              </path>
+            </svg>
+            <a href="404.html">contact@garp.fun</a>
+          </p>
+        </div>
+        <div class="footer-blocks__card">
+          <p class="mxd-point-subtitle anim-uni-in-up">
+            <svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px" width="20px" height="20px"
+              viewBox="0 0 20 20" fill="currentColor">
+              <path fill="currentColor"
+                d="M19.6,9.6c0,0-3,0-4,0c-0.4,0-1.8-0.2-1.8-0.2c-0.6-0.1-1.1-0.2-1.6-0.6c-0.5-0.3-0.9-0.8-1.2-1.2 c-0.3-0.4-0.4-0.9-0.5-1.4c0,0-0.1-1.1-0.2-1.5c-0.1-1.1,0-4.4,0-4.4C10.4,0.2,10.2,0,10,0S9.6,0.2,9.6,0.4c0,0,0.1,3.3,0,4.4 c0,0.4-0.2,1.5-0.2,1.5C9.4,6.7,9.2,7.2,9,7.6C8.7,8.1,8.2,8.5,7.8,8.9c-0.5,0.3-1,0.5-1.6,0.6c0,0-1.2,0.1-1.7,0.2 c-1,0.1-4.2,0-4.2,0C0.2,9.6,0,9.8,0,10c0,0.2,0.2,0.4,0.4,0.4c0,0,3.1-0.1,4.2,0c0.4,0,1.7,0.2,1.7,0.2c0.6,0.1,1.1,0.2,1.6,0.6 c0.4,0.3,0.8,0.7,1.1,1.1c0.3,0.5,0.5,1,0.6,1.6c0,0,0.1,1.3,0.2,1.7c0,1,0,4.1,0,4.1c0,0.2,0.2,0.4,0.4,0.4s0.4-0.2,0.4-0.4 c0,0,0-3.1,0-4.1c0-0.4,0.2-1.7,0.2-1.7c0.1-0.6,0.2-1.1,0.6-1.6c0.3-0.4,0.7-0.8,1.1-1.1c0.5-0.3,1-0.5,1.6-0.6 c0,0,1.3-0.1,1.8-0.2c1,0,4,0,4,0c0.2,0,0.4-0.2,0.4-0.4C20,9.8,19.8,9.6,19.6,9.6L19.6,9.6z">
+              </path>
+            </svg>
+            <a href="#">Careers</a>
+          </p>
+        </div>
+        <div class="footer-blocks__card fill-card notify">
+          <div class="footer-blocks__title anim-uni-in-up">
+            <p class="footer-blocks__title-m">Subscribe for updates:</p>
+          </div>
+          <div class="form-container anim-uni-in-up">
+            <div class="form__reply subscription-ok">
+              <span class="reply__text">Done! Thanks for subscribing.</span>
+            </div>
+            <div class="form__reply subscription-error">
+              <span class="reply__text">Ooops! Something went wrong. Please try again later.</span>
+            </div>
+            <form class="form notify-form form-light">
+              <input type="email" placeholder="Your Email" required>
+              <button class="btn btn-form btn-absolute-right btn-muted slide-right-up anim-no-delay" type="submit">
+                <i class="ph ph-arrow-up-right"></i>
+              </button>
+            </form>
+          </div>
+        </div>
+      </div>
+      <div class="footer-blocks__column animate-card-3">
+        <div class="footer-blocks__card fullheight-card">
+          <div class="footer-blocks__block">
+            <div class="footer-blocks__title anim-uni-in-up">
+              <p class="footer-blocks__title-l">Join our Community</p>
+            </div>
+            <div class="footer-blocks__socials">
+              <ul class="footer-socials">
+                <li class="footer-socials__item anim-uni-in-up"><a href="https://www.linkedin.com/company/beryhq/" class="footer-socials__link"
+                    target="_blank">LinkedIn</a></li>
+                <li class="footer-socials__item anim-uni-in-up"><a href="#" class="footer-socials__link"
+                    target="_blank">Instagram</a></li>
+                <li class="footer-socials__item anim-uni-in-up"><a href="#" class="footer-socials__link"
+                    target="_blank">YouTube</a></li>
+                <li class="footer-socials__item anim-uni-in-up"><a href="#" class="footer-socials__link"
+                    target="_blank">X</a></li>
+              </ul>
+            </div>
+          </div>
+          <div class="footer-blocks__links anim-uni-in-up">
+            <p class="t-xsmall t-muted">
+              Garp Blockchain
+              <i class="ph-bold ph-copyright"></i>
+              2025
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </footer>
+  <a href="#0" id="to-top" class="btn btn-round btn-to-top slide-up anim-no-delay">
+    <i class="ph ph-arrow-up"></i>
+  </a>
+  <script src="js/libs.min.js"></script>
+  <script src="js/app.min.js"></script>
+</body>
+
+</html>
