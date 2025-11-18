@@ -1,15 +1,13 @@
 package integration
 
 import (
-	"context"
-	"database/sql"
-	"encoding/json"
-	"fmt"
-	"time"
+    "context"
+    "database/sql"
+    "fmt"
+    "time"
 
-	_ "github.com/lib/pq"
-	_ "github.com/go-sql-driver/mysql"
-	_ "github.com/mattn/go-sqlite3"
+    _ "github.com/lib/pq"
+    _ "github.com/go-sql-driver/mysql"
 )
 
 // DBIntegration provides database integration capabilities for external systems

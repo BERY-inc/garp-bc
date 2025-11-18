@@ -1,90 +1,78 @@
 package main
 
 import (
-	"context"
-	"fmt"
-	"log"
-	"net/http"
-	"os"
-	"os/signal"
-	"syscall"
-	"time"
+    "context"
+    "fmt"
+    "log"
+    "net/http"
+    "os"
+    "os/signal"
+    "syscall"
+    "time"
 
-	"github.com/gin-gonic/gin"
-	_ "github.com/lib/pq"
+    "github.com/gin-gonic/gin"
 
-	"garp/backend-go/internal/client"
-	"garp/backend-go/internal/config"
-	"garp/backend-go/internal/middleware"
-	"garp/backend-go/internal/otel"
-	"garp/backend-go/internal/state"
-	"garp/backend-go/internal/storage"
+    "garp-backend/internal/client"
+    "garp-backend/internal/config"
+    "garp-backend/internal/middleware"
+    "garp-backend/internal/otel"
+    "garp-backend/internal/state"
+    "garp-backend/internal/storage"
 )
 
 func main() {
-	// Load configuration
-	cfg, err := config.Load()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
+    // Load configuration (defaults + env overrides)
+    cfg := config.Default()
+    config.ApplyEnv(&cfg)
 
-	// Initialize tracing
-	shutdown, err := otel.InitTracer(cfg.OtelEndpoint)
-	if err != nil {
-		log.Printf("Warning: Failed to initialize tracer: %v", err)
-	} else {
-		defer shutdown(context.Background())
-	}
+    // Initialize tracing
+    shutdown := otel.Init(cfg.OTEL.Endpoint, cfg.OTEL.ServiceName)
+    defer shutdown(context.Background())
 
-	// Connect to databases
-	primaryDB, err := storage.New(cfg.DatabaseURL)
-	if err != nil {
-		log.Fatalf("Failed to connect to primary database: %v", err)
-	}
-	defer primaryDB.Close()
+    // Connect to storage services (Postgres + Redis)
+    store, err := storage.Init(context.Background(), storage.Config{PostgresURL: cfg.Database.PostgresURL, RedisURL: cfg.Database.RedisURL})
+    if err != nil {
+        log.Fatalf("Failed to initialize storage: %v", err)
+    }
+    defer store.Close()
 
-	redisClient, err := storage.NewRedis(cfg.RedisURL)
-	if err != nil {
-		log.Fatalf("Failed to connect to Redis: %v", err)
-	}
-	defer redisClient.Close()
-
-	// Run migrations
-	if err := primaryDB.Migrate(); err != nil {
-		log.Fatalf("Failed to run migrations: %v", err)
-	}
+    // Run migrations
+    if err := store.RunMigrations(context.Background()); err != nil {
+        log.Fatalf("Failed to run migrations: %v", err)
+    }
 
 	// Initialize clients
-	participantClient := client.New(cfg.ParticipantURL)
-	if cfg.MTLS {
-		if err := participantClient.WithTLS(cfg.ClientCertFile, cfg.ClientKeyFile, cfg.CACertFile); err != nil {
-			log.Fatalf("Failed to configure mTLS: %v", err)
-		}
-	}
+    participantClient := client.New(cfg.Participant.BaseURL)
+    if err := participantClient.WithTLS(cfg.TLS.ClientCert, cfg.TLS.ClientKey, cfg.TLS.CACert); err != nil {
+        log.Fatalf("Failed to configure mTLS: %v", err)
+    }
 
 	// Initialize state manager
-	stateManager := state.New(primaryDB, redisClient)
+    // Initialize in-memory state store
+    stateManager := state.NewStore()
+    _ = stateManager
 
 	// Create Gin engine
-	gin.SetMode(cfg.GinMode)
-	r := gin.New()
-	r.Use(gin.Logger())
-	r.Use(gin.Recovery())
-	r.Use(middleware.CORS(cfg.AllowedOrigins))
-	r.Use(middleware.RateLimit(redisClient, cfg.RateLimitRPM))
+    gin.SetMode(gin.ReleaseMode)
+    r := gin.New()
+    r.Use(gin.Logger())
+    r.Use(gin.Recovery())
+    r.Use(middleware.SecurityHeaders())
+    r.Use(otel.Middleware(cfg.OTEL.ServiceName))
+    r.Use(middleware.RateLimitRedis(120, store.Redis))
 
 	// Health check endpoints
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
 	})
 	r.GET("/ready", func(c *gin.Context) {
-		// Check database connectivity
-		if err := primaryDB.Ping(); err != nil {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"status": "database unavailable"})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"status": "ready"})
-	})
+        // Check storage connectivity
+        if !store.Ready(c.Request.Context()) {
+            c.JSON(http.StatusServiceUnavailable, gin.H{"status": "database unavailable"})
+            return
+        }
+        c.JSON(http.StatusOK, gin.H{"status": "ready"})
+    })
 
 	// API routes
 	api := r.Group("/api/v1")
@@ -171,18 +159,18 @@ func main() {
 	}
 
 	// Start server
-	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", cfg.Port),
-		Handler: r,
-	}
+    srv := &http.Server{
+        Addr:    fmt.Sprintf(":%d", cfg.Server.Port),
+        Handler: r,
+    }
 
 	// Run server in a goroutine
-	go func() {
-		log.Printf("Starting server on port %d", cfg.Port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
-		}
-	}()
+    go func() {
+        log.Printf("Starting server on port %d", cfg.Server.Port)
+        if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+            log.Fatalf("Failed to start server: %v", err)
+        }
+    }()
 
 	// Wait for interrupt signal to gracefully shutdown the server
 	quit := make(chan os.Signal, 1)

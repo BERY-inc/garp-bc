@@ -1,11 +1,12 @@
 package integration
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
+    "context"
+    "bytes"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -78,12 +79,13 @@ func (ci *CloudIntegration) NewS3Storage() (*S3Storage, error) {
 
 // UploadToS3 uploads data to S3
 func (s3s *S3Storage) UploadToS3(ctx context.Context, bucket, key string, data []byte) error {
-	_, err := s3s.client.PutObjectWithContext(ctx, &s3.PutObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-		Body:   aws.ReadSeekCloser(data),
-	})
-	return err
+    reader := bytes.NewReader(data)
+    _, err := s3s.client.PutObjectWithContext(ctx, &s3.PutObjectInput{
+        Bucket: aws.String(bucket),
+        Key:    aws.String(key),
+        Body:   aws.ReadSeekCloser(reader),
+    })
+    return err
 }
 
 // DownloadFromS3 downloads data from S3
@@ -272,17 +274,17 @@ func (ci *CloudIntegration) NewWebhookSender() *WebhookSender {
 
 // SendWebhook sends a webhook to a specified URL
 func (ws *WebhookSender) SendWebhook(ctx context.Context, url string, payload interface{}) error {
-	// Marshal the payload to JSON
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal payload: %w", err)
-	}
-	
-	// Create the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
+    // Marshal the payload to JSON
+    data, err := json.Marshal(payload)
+    if err != nil {
+        return fmt.Errorf("failed to marshal payload: %w", err)
+    }
+    
+    // Create the HTTP request
+    req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+    if err != nil {
+        return fmt.Errorf("failed to create HTTP request: %w", err)
+    }
 	
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")

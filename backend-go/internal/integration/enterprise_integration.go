@@ -1,15 +1,16 @@
 package integration
 
 import (
-	"context"
-	"crypto/tls"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"time"
+    "context"
+    "bytes"
+    "crypto/tls"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "time"
 
-	"github.com/streadway/amqp"
-	"gopkg.in/ldap.v3"
+    "github.com/streadway/amqp"
+    "github.com/go-ldap/ldap/v3"
 )
 
 // EnterpriseIntegration provides integration with enterprise systems
@@ -67,19 +68,19 @@ type ERPTransaction struct {
 
 // CreateERPTransaction creates a new transaction in the ERP system
 func (erp *ERPSystem) CreateERPTransaction(ctx context.Context, transaction ERPTransaction) error {
-	url := fmt.Sprintf("%s/api/transactions", erp.baseURL)
-	
-	// Marshal the transaction to JSON
-	data, err := json.Marshal(transaction)
-	if err != nil {
-		return fmt.Errorf("failed to marshal transaction: %w", err)
-	}
-	
-	// Create the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
+    url := fmt.Sprintf("%s/api/transactions", erp.baseURL)
+    
+    // Marshal the transaction to JSON
+    data, err := json.Marshal(transaction)
+    if err != nil {
+        return fmt.Errorf("failed to marshal transaction: %w", err)
+    }
+    
+    // Create the HTTP request
+    req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+    if err != nil {
+        return fmt.Errorf("failed to create HTTP request: %w", err)
+    }
 	
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
@@ -167,19 +168,19 @@ type CRMContact struct {
 
 // CreateCRMContact creates a new contact in the CRM system
 func (crm *CRMSystem) CreateCRMContact(ctx context.Context, contact CRMContact) error {
-	url := fmt.Sprintf("%s/api/contacts", crm.baseURL)
-	
-	// Marshal the contact to JSON
-	data, err := json.Marshal(contact)
-	if err != nil {
-		return fmt.Errorf("failed to marshal contact: %w", err)
-	}
-	
-	// Create the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
+    url := fmt.Sprintf("%s/api/contacts", crm.baseURL)
+    
+    // Marshal the contact to JSON
+    data, err := json.Marshal(contact)
+    if err != nil {
+        return fmt.Errorf("failed to marshal contact: %w", err)
+    }
+    
+    // Create the HTTP request
+    req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+    if err != nil {
+        return fmt.Errorf("failed to create HTTP request: %w", err)
+    }
 	
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
@@ -443,17 +444,17 @@ type BlockchainToEnterpriseEvent struct {
 
 // SendEventToEnterprise sends a blockchain event to an enterprise system
 func (ei *EnterpriseIntegration) SendEventToEnterprise(ctx context.Context, url string, event BlockchainToEnterpriseEvent) error {
-	// Marshal the event to JSON
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("failed to marshal event: %w", err)
-	}
-	
-	// Create the HTTP request
-	req, err := http.NewRequestWithContext(ctx, "POST", url, nil)
-	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
-	}
+    // Marshal the event to JSON
+    data, err := json.Marshal(event)
+    if err != nil {
+        return fmt.Errorf("failed to marshal event: %w", err)
+    }
+    
+    // Create the HTTP request
+    req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+    if err != nil {
+        return fmt.Errorf("failed to create HTTP request: %w", err)
+    }
 	
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
