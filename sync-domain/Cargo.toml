@@ -36,12 +36,12 @@ rdkafka = { version = "0.36", features = ["cmake-build", "ssl", "sasl"] }
 lapin = "2.3"
 
 # Networking
-axum = "0.7"
+axum = "0.6"
 tower = "0.4"
-tower-http = { version = "0.5", features = ["cors", "trace", "limit"] }
+tower-http = { version = "0.4", features = ["cors", "trace", "limit"] }
 hyper = "1.0"
-tonic = "0.11"
-prost = "0.12"
+tonic = "0.12"
+prost = "0.13"
 
 # Database
 sqlx = { version = "0.7", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
@@ -70,4 +70,4 @@ ed25519-dalek = "2.0"
 vector_clock = "0.0.0"
 
 [build-dependencies]
-tonic-build = "0.11"
+tonic-build = "0.12"
