@@ -1,0 +1,54 @@
+# Global ignores to shrink Docker build context
+# Keep only source, manifests, Dockerfiles, and necessary assets
+
+# Rust build artifacts
+target/
+**/target/
+
+# Git and VCS
+.git/
+.gitignore
+
+# IDE/editor
+.vscode/
+.idea/
+.DS_Store
+
+# Node/Frontend
+frontend/node_modules/
+**/node_modules/
+
+# Go build outputs
+*.exe
+backend-go/garp-backend.exe
+
+# Tests and local data
+**/*.log
+**/*.tmp
+**/.pytest_cache/
+**/coverage/
+
+# Docker and compose caches
+.docker/
+
+# Exclude large data folders if any exist
+data/
+datasets/
+backups/
+
+# Allowlist essential paths
+!Cargo.toml
+!Cargo.lock
+!**/Cargo.toml
+!**/Dockerfile
+!docker-compose.yml
+!docker-compose.prod.yml
+!scripts/
+!frontend/
+!backend-go/
+!api-gateway-go/
+!global-synchronizer/
+!participant-node/
+!sync-domain/
+!garp-common/
+!.env.example
