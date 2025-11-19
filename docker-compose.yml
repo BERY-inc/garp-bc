@@ -109,8 +109,8 @@ services:
   # API services
   backend-go:
     build:
-      context: .
-      dockerfile: backend-go/Dockerfile
+      context: ./backend-go
+      dockerfile: Dockerfile
     ports:
       - "8081:8081"
     environment:

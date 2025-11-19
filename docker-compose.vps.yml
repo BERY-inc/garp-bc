@@ -147,8 +147,8 @@ services:
   # API services
   backend-go:
     build:
-      context: .
-      dockerfile: backend-go/Dockerfile
+      context: ./backend-go
+      dockerfile: Dockerfile
     environment:
       PARTICIPANT_URL: ${PARTICIPANT_URL}
       SYNCHRONIZER_URL: ${SYNCHRONIZER_URL}
