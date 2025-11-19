@@ -101,6 +101,9 @@ services:
     ports: []
 
   backend-go:
+    build:
+      context: ./backend-go
+      dockerfile: Dockerfile
     environment:
       PARTICIPANT_URL: ${PARTICIPANT_URL}
       SYNCHRONIZER_URL: ${SYNCHRONIZER_URL}
