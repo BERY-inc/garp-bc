@@ -1,4 +1,8 @@
-version: "3.8"
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: ${LOG_MAX_SIZE:-10m}
+    max-file: ${LOG_MAX_FILE:-3}
 
 services:
   postgres:
@@ -7,33 +11,94 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   redis:
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   zookeeper:
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
 
   kafka:
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - NET_RAW
 
   participant-node:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # Override dev ports to keep service private in production
+    ports: []
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
 
   sync-domain:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       KAFKA_BROKERS: ${KAFKA_BROKERS}
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports: []
 
   global-synchronizer:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       NODE_ID: ${NODE_ID}
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports: []
 
   backend-go:
     environment:
@@ -42,6 +107,14 @@ services:
       POSTGRES_URL: ${DATABASE_URL}
       REDIS_URL: ${REDIS_URL}
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports: []
 
   api-gateway-go:
     environment:
@@ -51,6 +124,31 @@ services:
       REDIS_URL: ${REDIS_URL}
       RATE_LIMIT_RPM: ${RATE_LIMIT_RPM}
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - internal
+      - public
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    # Keep public API port
+    # Port mapping comes from dev compose; maintain exposure
 
   frontend:
     restart: unless-stopped
+    logging: *default-logging
+    networks:
+      - public
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+
+networks:
+  internal:
+    internal: true
+  public:
+    driver: bridge
