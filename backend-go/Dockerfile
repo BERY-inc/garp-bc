@@ -9,6 +9,7 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=build /app/garp-backend .
-COPY migrations/ migrations/
+# Copy migrations from monorepo root into the path the app expects
+COPY backend-go/migrations/ backend-go/migrations/
 EXPOSE 8081
 CMD ["./garp-backend"]
